@@ -1,0 +1,16 @@
+{
+  "name": "sample-client-swio-api",
+  "version": "1.0.0",
+  "description": "Sample Node client for Swio API.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Sucursal Web (Comercio Electrónico Austral S.A.)",
+  "license": "MIT",
+  "dependencies": {
+    "googleapis": "^27.0.0",
+    "request": "^2.87.0",
+    "request-promise-native": "^1.0.5"
+  }
+}
