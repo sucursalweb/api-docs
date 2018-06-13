@@ -63,3 +63,5 @@ typings/
 # Google API Req
 client_secret.json
 credentials.json
+
+.DS_Store
