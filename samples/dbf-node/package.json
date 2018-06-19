@@ -1,0 +1,18 @@
+{
+  "name": "dbf",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "debug": "node --nolazy --inspect-brk=9229 index.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dbffile": "^0.7.5",
+    "request": "^2.87.0",
+    "request-promise-native": "^1.0.5"
+  },
+  "devDependencies": {}
+}
