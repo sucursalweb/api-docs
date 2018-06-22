@@ -22,8 +22,8 @@ La API solo está expuesta vía [TLS](https://en.wikipedia.org/wiki/Transport_La
 ### HTTP2
 Usamos la versión 2 del protocolo HTTP (HTTP2) para comunicarnos, así que todas las llamadas deben adecuarse.
 
-## Tamaño del BODY
-* En llamadas a la API (ej. Métodos de tipo "POST"), no debe superar los 10MB o va a ser rechazado (algunas operaciones, permiten rodear este límite, gracias al envío de lotes.
+### Tamaño del BODY
+En llamadas a la API (ej. Métodos de tipo "POST"), no debe superar los 10MB o va a ser rechazado (algunas operaciones, permiten rodear este límite, gracias al envío de lotes.
 
 ### Autenticación
 Todas las llamadas tienen que identificarse informando el "Tenant" y la "Api-Key" que le corresponden a tu #sucursalweb.
