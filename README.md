@@ -39,7 +39,8 @@ curl -H 'User-Agent: Pure HTTP client v1.0' /
 Acá, un listado de los que hay hasta ahora. Aceptamos contribuciones :)
 
 * Llamadas HTTP (elemental)
-* Integración entre Google Sheets y la API Bulk para Sincronizaciones (en Node)
+* Integración entre Google Sheets y la API Bulk para Sincronizaciones. [Ver sample](https://github.com/sucursalweb/api-docs/tree/master/samples/googlesheet-node) hecho en NodeJS
+* Sincronizar masivamente Sistemas que usan archivos DBF ([dBASE III](https://es.wikipedia.org/wiki/DBase#dBASE_III)) para el almacenamiento de datos. [Ver sample](https://github.com/sucursalweb/api-docs/tree/master/samples/dbf-node) hecho en NodeJS
 
 ### Llamadas HTTP
 Aca podes aprender como las formas de comunicarte directamente con la API, hablando HTTP puro, sin librerías, lenguajes ni *Frameworks*. Estas llamadas, ayudan a entender los flujos y detalles de las distintas *conversaciones* que tengas con la API de [#sucursalweb](https://twitter.com/sucursalwebio)
