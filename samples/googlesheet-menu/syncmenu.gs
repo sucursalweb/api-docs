@@ -30,6 +30,7 @@ function synchronize_() {
   // Incomplete sample for challenge...
   //
   // Read:
+  //        https://developers.google.com/apps-script/guides/sheets
   //        https://developers.google.com/apps-script/guides/sheets/functions
   //        https://developers.google.com/apps-script/quickstart/macros
   //        https://developers.google.com/apps-script/reference/url-fetch/url-fetch-app
