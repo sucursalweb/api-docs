@@ -19,9 +19,6 @@ Algunos tips importantes, para evitarte problemas a la hora de codear :)
 ### TLS
 La API solo está expuesta vía [TLS](https://en.wikipedia.org/wiki/Transport_Layer_Security), con lo cual todas las llamadas que no sean "http**s**://" van a ser descartadas.\
 
-### HTTP2
-Usamos la versión 2 del protocolo HTTP (HTTP2) para comunicarnos, así que todas las llamadas deben adecuarse.
-
 ### Tamaño del BODY
 En llamadas a la API (ej. Métodos de tipo "POST"), no debe superar los 10MB o va a ser rechazado (algunas operaciones, permiten rodear este límite, gracias al envío de lotes.
 
