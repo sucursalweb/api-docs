@@ -7,9 +7,10 @@ Las distintas APIs que presentamos, para que puedas interactuar con tu [#sucursa
 ### API Bulk
 La razon por la que creamos esta API, es para que ERPs (o Software de Gestión, o de Facturación, o de Stock. "Se los llama de muchas formas") puedan actualizar todo el catálogo en forma masiva.
 
-### API Transaccional *(pendiente)
+### API Transaccional
 Para realizar operaciones "conversacionales" con tu Tienda, que te faciliten integrarla con tus sistemas de *back-end*. Algunos ejemplos:
 
+* Listar ordenes recibidas
 * Obtener los datos de un cliente
 * Obtener los datos de un pedido
 
@@ -134,3 +135,27 @@ curl -H 'User-Agent: Pure HTTP client v1.0' /
     -H 'Tenant: [YOUR-TENANT]' /
   https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR]
 ```
+
+#### API Transaccional
+
+##### Listar ordenes recibidas
+Esta operación permite traer un listado con las órdenes (pedidos) recibidas el día anterior (ver opciones), en una sola acción.
+
+**Opciones:**
+
+* Se puede indicar opcionalmente, la cantidad de días hacia atrás ([days=1..7]). El valor máximo es de 7. Si no se indica, se trae información del día anterior (days=1).
+* Solo se listaran aquellas órdenes que hayan sido "colocadas" y no hayan pasado a otro estado.
+* Se sugiere usar este listado como apoyo diario para conciliar los pedidos recibidos
+* **Tiempo Real:** se pueden usar las notificaciones que se envían por correo electrónico a tal fin.
+
+```
+curl -H 'User-Agent: Pure HTTP client v1.0' /
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' /
+    -H 'Tenant: [YOUR-TENANT]' /
+  https://api.sucursalweb.io/v1/order/list[?days=1..7]  
+```
+
+##### Obtener los datos de un cliente
+(documentación pendiente) (ver https://github.com/australcommerce/api#recuperar-un-cliente)
+##### Obtener los datos de un pedido
+(documentación pendiente) (ver https://github.com/australcommerce/api#orden)
