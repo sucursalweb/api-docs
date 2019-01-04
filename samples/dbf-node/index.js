@@ -6,7 +6,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 //
 
 const TENANT = 'demo-tenant';
-const APIKEY = 'YOUR-API-KEY'
+const APIKEY = 'YOUR-API-KEY';
 
 var tags = [];
 
