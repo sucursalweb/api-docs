@@ -27,9 +27,9 @@ En llamadas a la API (ej. Métodos de tipo "POST"), no debe superar los 10MB o v
 Todas las llamadas tienen que identificarse informando el "Tenant" y la "Api-Key" que le corresponden a tu #sucursalweb.
 
 ```
-curl -H 'User-Agent: Pure HTTP client v1.0' /
-    -H 'Api-Key: [YOUR_VALID_API_KEY]' /
-    -H 'Tenant: [YOUR-TENANT]' /
+curl -H 'User-Agent: Pure HTTP client v1.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
   https://api.sucursalweb.io/[...]
 ```
 
@@ -56,9 +56,9 @@ El objetivo es mantener de forma masiva **todos** los productos de tu catálogo.
 
 ##### 1. Inicializar y obtener un *Identificador*
 ```
-curl -H 'User-Agent: Pure HTTP client v1.0' /
-    -H 'Api-Key: [YOUR_VALID_API_KEY]' /
-    -H 'Tenant: [YOUR-TENANT]' /
+curl -H 'User-Agent: Pure HTTP client v1.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
   https://api.sucursalweb.io/v1/sync
 ```
 
@@ -109,30 +109,30 @@ lote1='[{
         "Attachs": []
       }]'
 
-curl -H 'User-Agent: Pure HTTP client v1.0' /
-    -H 'Api-Key: [YOUR_VALID_API_KEY]' /
-    -H 'Tenant: [YOUR-TENANT]' /
-    -H 'Content-Type: application/json' /
-    -X POST /
-    -data $lote1 /
+curl -H 'User-Agent: Pure HTTP client v1.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
+    -H 'Content-Type: application/json' \
+    -X POST \
+    -data $lote1 \
   https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR]
 ```
 
 ##### 3. Solicitar una Sincronización
 ```
-curl -H 'User-Agent: Pure HTTP client v1.0' /
-    -H 'Api-Key: [YOUR_VALID_API_KEY]' /
-    -H 'Tenant: [YOUR-TENANT]' /
-    -H 'Content-Type: application/json' /
-    -X PUT /
+curl -H 'User-Agent: Pure HTTP client v1.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
+    -H 'Content-Type: application/json' \
+    -X PUT \
   https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR]
 ```
 
 ##### 4. Obtener el estado de la Sincronización
 ```
-curl -H 'User-Agent: Pure HTTP client v1.0' /
-    -H 'Api-Key: [YOUR_VALID_API_KEY]' /
-    -H 'Tenant: [YOUR-TENANT]' /
+curl -H 'User-Agent: Pure HTTP client v1.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
   https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR]
 ```
 
@@ -149,9 +149,9 @@ Esta operación permite traer un listado con las órdenes (pedidos) recibidas el
 * **Tiempo Real:** se pueden usar las notificaciones que se envían por correo electrónico a tal fin.
 
 ```
-curl -H 'User-Agent: Pure HTTP client v1.0' /
-    -H 'Api-Key: [YOUR_VALID_API_KEY]' /
-    -H 'Tenant: [YOUR-TENANT]' /
+curl -H 'User-Agent: Pure HTTP client v1.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
   https://api.sucursalweb.io/v1/order/list[?days=1..7]  
 ```
 
