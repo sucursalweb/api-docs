@@ -67,7 +67,7 @@ curl -H 'User-Agent: Pure HTTP client v1.0' \
 lote1='[{
         "Code": "P0001",
         "Name": "Producto de ejemplo 1",
-        "Details": null,
+        "Details": "<detalles o cadena-vacia",
         "Prices": [
           {
             "Price": 5,
