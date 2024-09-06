@@ -64,57 +64,72 @@ curl -H 'User-Agent: Pure HTTP client v1.0' \
 
 ##### 2. Subir un lote
 ```
-lote1='[{
+lote1='[
+    {
         "Code": "P0001",
-        "Name": "Producto de ejemplo 1",
+        "Name": "Producto de ejemplo 26",
         "Details": "<detalles o cadena-vacia>",
         "Prices": [
-          {
-            "Price": 5,
-            "SalePrice": 0
-          },
-          {
-            "Price": 8,
-            "SalePrice": 7
-          }
+            {
+                "Price": 5,
+                "SalePrice": 0
+            },
+            {
+                "Price": 8,
+                "SalePrice": 7
+            }
         ],
         "Variants": [
-          {
-            "Variant": "Color",
-            "OrderedList": ["Negro","Blanco"]
-          },
-          {
-            "Variant": "Talle",
-            "OrderedList": ["S","M","L"]
-          }
+            {
+                "Variant": "Color",
+                "OrderedList": [
+                    "Negro",
+                    "Blanco"
+                ]
+            },
+            {
+                "Variant": "Talle",
+                "OrderedList": [
+                    "S",
+                    "M",
+                    "L"
+                ]
+            }
         ],
         "Props": [
-          {
-            "Prop": "Trama",
-            "Value": "Liso"
-          },
-          {
-            "Prop": "Catalogo",
-            "Value": "Pag. 3"
-          }
+            {
+                "Prop": "Trama",
+                "Value": "Liso"
+            },
+            {
+                "Prop": "Catalogo",
+                "Value": "Pag. 3"
+            }
         ],
         "Brand": null,
-        "Tags":["RUBRO A","RUBRO B","DIA DEL PADRE"],
-        "IsNew": 0,
-        "IsSale": 1,
-        "IsBold": 0,
-        "IsUnavailable": 0,
-        "IsEnabled": 1,
-        "Pics": [],
+        "Tags": [
+            "RUBRO A",
+            "RUBRO B",
+            "DIA DEL PADRE"
+        ],
+        "IsNew": false,
+        "IsSale": true,
+        "IsBold": true,
+        "IsUnavailable": false,
+        "IsEnabled": true,
+        "Pics": [
+            "prod1.jpg"
+        ],
         "Attachs": []
-      }]'
+    }
+]'
 
 curl -H 'User-Agent: Pure HTTP client v1.0' \
     -H 'Api-Key: [YOUR_VALID_API_KEY]' \
     -H 'Tenant: [YOUR-TENANT]' \
     -H 'Content-Type: application/json' \
     -X POST \
-    -data $lote1 \
+    --data "$lote1" \
   https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR]
 ```
 
@@ -125,7 +140,7 @@ curl -H 'User-Agent: Pure HTTP client v1.0' \
     -H 'Tenant: [YOUR-TENANT]' \
     -H 'Content-Type: application/json' \
     -X PUT \
-  https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR]
+  https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR] -d ''
 ```
 
 ##### 4. Obtener el estado de la Sincronización
