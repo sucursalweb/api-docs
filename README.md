@@ -44,7 +44,7 @@ Acá, un listado de los que hay hasta ahora. Aceptamos contribuciones :)
 ### Llamadas HTTP
 Aca podes aprender como las formas de comunicarte directamente con la API, hablando HTTP puro, sin librerías, lenguajes ni *Frameworks*. Estas llamadas, ayudan a entender los flujos y detalles de las distintas *conversaciones* que tengas con la API de [#sucursalweb](https://twitter.com/sucursalwebio)
 
-#### API Bulk
+#### API Bulk (transferencia por lotes)
 El objetivo es mantener de forma masiva **todos** los productos de tu catálogo. Está preparada para trabajar con docenas, cientos o miles de actualizaciones, permitiendo poner al día todo tu catálogo, con un minimo esfuerzo.
 
 **Flujo:** para iniciar una Sincronización a través de la API Bulk, hay que hacer las siguientes operaciones en el orden indicado:
@@ -54,7 +54,13 @@ El objetivo es mantener de forma masiva **todos** los productos de tu catálogo.
 3. Solicitar una Sincronización
 4. Obtener el estado de la Sincronización (**poll**)
 
-##### 1. Inicializar y obtener un *Identificador*
+#### Versiones de la API Bulk:
+* [v1](#1-inicializar-y-obtener-un-identificador---v1): permite subir productos para sincronizar el catálogo.
+* [v2](#1-inicializar-y-obtener-un-identificador---v2): agrega el campo `Exclusions` para informar combinaciones de Variantes que no tienen stock al momento de la Sincronización.
+
+---
+
+#### 1. Inicializar y obtener un *Identificador* - (v1)
 ```
 curl -H 'User-Agent: Pure HTTP client v1.0' \
     -H 'Api-Key: [YOUR_VALID_API_KEY]' \
@@ -62,7 +68,8 @@ curl -H 'User-Agent: Pure HTTP client v1.0' \
   https://api.sucursalweb.io/v1/sync
 ```
 
-##### 2. Subir un lote
+#### 2. Subir un lote - (v1)
+
 ```
 lote1='[
     {
@@ -133,7 +140,7 @@ curl -H 'User-Agent: Pure HTTP client v1.0' \
   https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR]
 ```
 
-##### 3. Solicitar una Sincronización
+#### 3. Solicitar una Sincronización - (v1)
 ```
 curl -H 'User-Agent: Pure HTTP client v1.0' \
     -H 'Api-Key: [YOUR_VALID_API_KEY]' \
@@ -143,13 +150,79 @@ curl -H 'User-Agent: Pure HTTP client v1.0' \
   https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR] -d ''
 ```
 
-##### 4. Obtener el estado de la Sincronización
+#### 4. Obtener el estado de la Sincronización - (v1)
 ```
 curl -H 'User-Agent: Pure HTTP client v1.0' \
     -H 'Api-Key: [YOUR_VALID_API_KEY]' \
     -H 'Tenant: [YOUR-TENANT]' \
   https://api.sucursalweb.io/v1/sync/[IDENTIFICADOR]
 ```
+
+---
+
+#### 1. Inicializar y obtener un *Identificador* - (v2)
+> Similar a v1, pero con el endpoint v2 y el `User-Agent` actualizado.
+```
+curl -H 'User-Agent: Pure HTTP client v2.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
+  https://api.sucursalweb.io/v2/sync
+```
+
+#### 2. Subir un lote - (v2)
+
+Solo se agrega el campo `Exclusions` (array). Informa la lista de combinaciones de Variantes (`Variants`) para las que NO hay stock al momento.
+
+En el siguiente ejemplo, se indica que NO hay STOCK solo para la combinacion - *Color*: Negro, *Talle:* M -
+```
+lote1='[
+    {
+        [...],
+        "Exclusions": [ 
+            [ 
+                { 
+                    "Variant": "Color", 
+                    "Value": "Negro" 
+                }, 
+                { 
+                    "Variant": "Talle", 
+                    "Value": "M" 
+                } 
+            ] 
+        ]
+    }
+]'
+
+curl -H 'User-Agent: Pure HTTP client v2.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
+    -H 'Content-Type: application/json' \
+    -X POST \
+    --data "$lote1" \
+  https://api.sucursalweb.io/v2/sync/[IDENTIFICADOR]
+```
+
+#### 3. Solicitar una Sincronización - (v2)
+> Similar a v1, pero con el endpoint v2 y el `User-Agent` actualizado.
+```
+curl -H 'User-Agent: Pure HTTP client v2.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
+    -H 'Content-Type: application/json' \
+    -X PUT \
+  https://api.sucursalweb.io/v2/sync/[IDENTIFICADOR] -d ''
+```
+
+#### 4. Obtener el estado de la Sincronización - (v2)
+> Similar a v1, pero con el endpoint v2 y el `User-Agent` actualizado.
+```
+curl -H 'User-Agent: Pure HTTP client v2.0' \
+    -H 'Api-Key: [YOUR_VALID_API_KEY]' \
+    -H 'Tenant: [YOUR-TENANT]' \
+  https://api.sucursalweb.io/v2/sync/[IDENTIFICADOR]
+```
+
+---
 
 #### API Transaccional
 
