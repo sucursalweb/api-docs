@@ -66,6 +66,12 @@ PROCEDURE Main
     * "NONE"     - No deduplication (original behavior - may cause API errors)
     gcDedupeStrategy = "FIRST"  && Default: simple first-wins strategy
     
+    * FORCE deduplication ON to prevent API errors - never use NONE in production
+    IF UPPER(gcDedupeStrategy) = "NONE"
+        WriteLog("ADVERTENCIA: Deduplicación NONE detectada - forzando a FIRST para evitar errores de API")
+        gcDedupeStrategy = "FIRST"
+    ENDIF
+    
     LOCAL llLogEnabled
     LOCAL llContinue  && Flag for early return conditions
 
@@ -142,6 +148,13 @@ PROCEDURE Main
             LOCAL lnCount
             * Llamamos PrepareProducts que trabajará con las variables globales directamente
             lnCount = PrepareProducts(lcArticuloPath)
+            
+            * CRITICAL: Verify no duplicates exist before proceeding
+            IF .NOT. VerifyNoDuplicates()
+                WriteLog("CRÍTICO: Se encontraron duplicados después de la preparación - abortando sincronización")
+                ShowError("Se encontraron productos duplicados en la lista final. Revisa el log para detalles.")
+                llContinue = .F.
+            ENDIF
             
             * Debug: Verificar estado después de PrepareProducts
             WriteLog("Main: POST-PrepareProducts - Conteo: " + TRANSFORM(lnCount))
@@ -484,6 +497,15 @@ PROCEDURE UploadProductBatches(lcApiBase, lcSyncId, lnBatchSize)
     LOCAL lnTotal, lnBatches, i
     LOCAL lcResult
     lcResult = .T.
+    
+    * CRITICAL: Final verification before sending to API
+    WriteLog("VERIFICACIÓN CRÍTICA: Validando lista antes del envío a la API...")
+    IF .NOT. VerifyNoDuplicates()
+        WriteLog("CRÍTICO: Duplicados detectados justo antes del envío - ABORTANDO")
+        ShowError("Se detectaron productos duplicados antes del envío a la API. Operación cancelada.")
+        RETURN .F.
+    ENDIF
+    WriteLog("OK: Verificación final pasada - procediendo con el envío")
     
     * Validación de las variables globales de productos
     WriteLog("DEBUG UploadProductBatches: Verificación inicial")
@@ -1274,11 +1296,22 @@ ENDPROC
 * Returns .T. if we should add this product, .F. if it's a duplicate we should skip
 FUNCTION ShouldAddProduct(lcProductCode, lcCurrentRecord)
     LOCAL llShouldAdd, lnExistingPos, lcExistingCode
-    LOCAL llCurrentBetter
+    LOCAL llCurrentBetter, lcCheckCode, lcCheckList
     
-    * Check deduplication strategy
-    IF gcDedupeStrategy = "NONE"
-        RETURN .T.  && No deduplication - add everything
+    * Validate input
+    IF EMPTY(lcProductCode)
+        WriteLog("ERROR ShouldAddProduct: Código de producto vacío")
+        RETURN .F.
+    ENDIF
+    
+    * Normalize the strategy to uppercase for comparison
+    LOCAL lcStrategy
+    lcStrategy = UPPER(ALLTRIM(gcDedupeStrategy))
+    
+    * Check deduplication strategy - NEVER allow NONE to prevent API errors
+    IF lcStrategy = "NONE"
+        WriteLog("ADVERTENCIA: Estrategia NONE ignorada - usando FIRST para prevenir errores de API")
+        lcStrategy = "FIRST"
     ENDIF
     
     llShouldAdd = .T.  && Default: add the product
@@ -1287,34 +1320,34 @@ FUNCTION ShouldAddProduct(lcProductCode, lcCurrentRecord)
     IF !EMPTY(gcProductList)
         * Simple check: look for the exact code in the comma-separated list
         * We need to be careful about partial matches, so we check with commas
-        lcCheckCode = "," + lcProductCode + ","
-        lcCheckList = "," + gcProductList + ","
+        lcCheckCode = "," + ALLTRIM(UPPER(lcProductCode)) + ","
+        lcCheckList = "," + UPPER(gcProductList) + ","
         
         IF AT(lcCheckCode, lcCheckList) > 0
             * Duplicate found! Apply strategy
-            WriteLog("DUPLICADO encontrado: " + lcProductCode + " - Estrategia: " + gcDedupeStrategy)
+            WriteLog("DUPLICADO encontrado: " + lcProductCode + " - Estrategia: " + lcStrategy)
             
             DO CASE
-                CASE gcDedupeStrategy = "FIRST"
+                CASE lcStrategy = "FIRST"
                     * Keep the first occurrence (skip this duplicate)
                     llShouldAdd = .F.
                     WriteLog("DUPLICADO descartado: " + lcProductCode + " (manteniendo el primero)")
                     
-                CASE gcDedupeStrategy = "LAST"
+                CASE lcStrategy = "LAST"
                     * Replace the existing one with this one
                     * First remove the existing occurrence
                     RemoveProductFromList(lcProductCode)
                     llShouldAdd = .T.
                     WriteLog("DUPLICADO reemplazado: " + lcProductCode + " (manteniendo el último)")
                     
-                CASE gcDedupeStrategy = "QUALITY"
+                CASE lcStrategy = "QUALITY"
                     * Use the advanced quality-based comparison
                     RETURN ShouldAddProductAdvanced(lcProductCode)
                     
                 OTHERWISE
-                    * Unknown strategy - default to FIRST
+                    * Unknown strategy - default to FIRST for safety
                     llShouldAdd = .F.
-                    WriteLog("DUPLICADO descartado: " + lcProductCode + " (estrategia desconocida, usando FIRST)")
+                    WriteLog("DUPLICADO descartado: " + lcProductCode + " (estrategia desconocida '" + lcStrategy + "', usando FIRST)")
             ENDCASE
         ENDIF
     ENDIF
@@ -1908,4 +1941,51 @@ FUNCTION LookupTablas(lnTabla, lcCodigo)
     ENDTRY
     
     RETURN lcResult
+ENDFUNC
+
+* ================================================================================
+* VerifyNoDuplicates - Verifica que no hay duplicados en la lista final de productos
+* ================================================================================
+FUNCTION VerifyNoDuplicates()
+    LOCAL lnI, lnJ, lcProductArray, lcCurrentCode, lcCompareCode
+    LOCAL llDuplicatesFound, lnDuplicateCount
+    
+    llDuplicatesFound = .F.
+    lnDuplicateCount = 0
+    
+    IF EMPTY(gcProductList)
+        WriteLog("VerifyNoDuplicates: Lista de productos vacía")
+        RETURN .T.  && No duplicates in empty list
+    ENDIF
+    
+    * Convert comma-separated list to array for easier checking
+    LOCAL laProducts[1]
+    LOCAL lnProducts
+    lnProducts = ALINES(laProducts, STRTRAN(gcProductList, ",", CHR(13)))
+    
+    WriteLog("VerifyNoDuplicates: Verificando " + TRANSFORM(lnProducts) + " productos...")
+    
+    * Check each product against all others
+    FOR lnI = 1 TO lnProducts
+        lcCurrentCode = ALLTRIM(UPPER(laProducts[lnI]))
+        IF !EMPTY(lcCurrentCode)
+            FOR lnJ = lnI + 1 TO lnProducts
+                lcCompareCode = ALLTRIM(UPPER(laProducts[lnJ]))
+                IF lcCurrentCode == lcCompareCode
+                    WriteLog("ERROR: DUPLICADO encontrado en verificación final: '" + lcCurrentCode + "' en posiciones " + TRANSFORM(lnI) + " y " + TRANSFORM(lnJ))
+                    llDuplicatesFound = .T.
+                    lnDuplicateCount = lnDuplicateCount + 1
+                ENDIF
+            ENDFOR
+        ENDIF
+    ENDFOR
+    
+    IF llDuplicatesFound
+        WriteLog("ERROR: Se encontraron " + TRANSFORM(lnDuplicateCount) + " duplicados en la lista final!")
+        WriteLog("CRÍTICO: Esto causará errores en la API - revisar la lógica de deduplicación")
+        RETURN .F.
+    ELSE
+        WriteLog("OK: Verificación completada - no se encontraron duplicados en la lista final")
+        RETURN .T.
+    ENDIF
 ENDFUNC
