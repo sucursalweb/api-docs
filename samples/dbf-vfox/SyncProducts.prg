@@ -3,14 +3,7 @@
 * Follows 4 main sync steps, batching 200 products in Step #2
 *
 * === DEDUPLICATION STRATEGIES ===
-* The script now handles duplicate CODIGO entries with configurable strategies:
-* - "FIRST"   : Keep first occurrence, skip duplicates (default, fast)
-* - "LAST"    : Keep last occurrence, replace previous  
-* - "QUALITY" : Compare quality scores and keep the best version
-* - "NONE"    : No deduplication (original behavior, may cause API errors)
-* 
-* Configure via: gcDedupeStrategy = "FIRST|LAST|QUALITY|NONE"
-* Quality scoring considers: description length, price, images, variants, categories
+* The script now handles duplicate CODIGO entries with direct SQL filtering
 *
 *
 * === DEBUGGING AYUDA ===
@@ -40,7 +33,6 @@ PROCEDURE Main
     * Initialize configuration variables first
     PUBLIC gcArticuloPath, gcTablasPath, gcApiBase, gnBatchSize, gnIvaRate
     PUBLIC gcTenant, gcApiKey, gcLogFile
-    PUBLIC gcDedupeStrategy  && New: controls deduplication behavior
     
     * Initialize product data storage
     gcProductList = ""
@@ -52,25 +44,11 @@ PROCEDURE Main
     gcApiBase = "https://api.sucursalweb.io/v2"             && API base URL
     gnBatchSize = 200                                       && Default batch size for uploads
     gnIvaRate = 1.21                                        && Multiplicador de IVA (21%)
-    gcDebugFolder = "/samples/dbf-vfox/"                    && Folder for debug output files
 
     * Authentication and logging
     gcTenant = "mi-tenant-id"                               && Reemplaza con tu Tenant real
     gcApiKey = "mi-api-key-secreto"                         && Reemplaza con tu Api-Key secreto
     gcLogFile = "/samples/dbf-vfox/synclog.txt"             && Archivo de log
-    
-    * Deduplication strategy configuration
-    * "FIRST"    - Keep first occurrence, skip duplicates (simple & fast)
-    * "QUALITY"  - Compare duplicates and keep the best quality version
-    * "LAST"     - Keep last occurrence (replace previous)
-    * "NONE"     - No deduplication (original behavior - may cause API errors)
-    gcDedupeStrategy = "FIRST"  && Default: simple first-wins strategy
-    
-    * FORCE deduplication ON to prevent API errors - never use NONE in production
-    IF UPPER(gcDedupeStrategy) = "NONE"
-        WriteLog("ADVERTENCIA: Deduplicación NONE detectada - forzando a FIRST para evitar errores de API")
-        gcDedupeStrategy = "FIRST"
-    ENDIF
     
     LOCAL llLogEnabled
     LOCAL llContinue  && Flag for early return conditions
@@ -112,7 +90,7 @@ PROCEDURE Main
     WriteLog("=== Sincronización de Productos con SucursalWeb API v2 ===")
     WriteLog("DBF Origen: " + gcArticuloPath)  && Using global variable
     WriteLog("Tamaño de lote: " + TRANSFORM(gnBatchSize))  && Using global variable
-    WriteLog("")
+    WriteLog("Estrategia de deduplicación: SQL direct")
     
     * Verifica conexión a Internet antes de empezar
     IF .NOT. CheckInternetConnection()
@@ -160,10 +138,6 @@ PROCEDURE Main
             WriteLog("Main: POST-PrepareProducts - Conteo: " + TRANSFORM(lnCount))
             WriteLog("Main: gcProductList length: " + TRANSFORM(LEN(gcProductList)))
             WriteLog("Main: gnProductCount: " + TRANSFORM(gnProductCount))
-            
-            * === DEBUG: Guardar lista de productos ===
-            SaveDebugProductList()
-            * === END DEBUG ===
             
             * Validar que tenemos productos para procesar
             IF lnCount <= 0 OR EMPTY(gcProductList)
@@ -232,10 +206,10 @@ PROCEDURE Main
             
             * Mostrar resultado final
             IF lcStatus = "Completed"
-                ShowInfo("Sincronización completada exitosamente.")
+                * ShowInfo("Sincronización completada exitosamente.")
                 WriteLog("ÉXITO: Proceso de sincronización completado")
             ELSE
-                ShowWarning("Sincronización finalizada con estado: " + lcStatus)
+                * ShowWarning("Sincronización finalizada con estado: " + lcStatus)
                 WriteLog("AVISO: Proceso de sincronización terminado con estado: " + lcStatus)
             ENDIF
         ENDIF
@@ -327,6 +301,15 @@ FUNCTION RecordMatchesCriteria(lcActivoField, lcWebField)
 ENDFUNC
 
 * Prepara la lista de productos desde el archivo DBF
+* 
+* DEDUPLICATION STRATEGIES AVAILABLE:
+* 1. FIRST occurrence (MIN RECNO): Takes the first record found for each CODIGO
+* 2. LAST occurrence (MAX RECNO): Takes the last record found for each CODIGO  
+* 3. HIGHEST PRECIO1: Takes the record with the highest price for each CODIGO
+*
+* To switch strategies, find the "DEDUPLICATION STRATEGY OPTIONS" section below
+* and comment/uncomment the desired option.
+*
 FUNCTION PrepareProducts(lcArticuloPath)
     LOCAL lnCount, lnResult, lnIndex
     
@@ -405,49 +388,121 @@ FUNCTION PrepareProducts(lcArticuloPath)
             
             WriteLog("DEBUG PrepareProducts: Found " + TRANSFORM(lnCount) + " matching records")
             
+            * Count and process matching records with SQL deduplication
+            WriteLog("DEBUG PrepareProducts: Using SQL GROUP BY for deduplication...")
+            
+            * Clean any existing cursors
+            IF USED("UniqueProducts")
+                USE IN UniqueProducts
+            ENDIF
+            
+            * ========== DEDUPLICATION STRATEGY OPTIONS ==========
+            * Choose ONE of the following three approaches by commenting/uncommenting
+            
+            * OPTION 1: First occurrence (MIN RECNO) - Currently ACTIVE
+            SELECT CODIGO, MIN(RECNO()) as SelectedRecord ;
+                FROM Articulos ;
+                WHERE UPPER(ALLTRIM(&lcActivoField)) = 'S' ;
+                AND UPPER(ALLTRIM(&lcWebField)) = 'S' ;
+                AND !EMPTY(ALLTRIM(CODIGO)) ;
+                GROUP BY CODIGO ;
+                ORDER BY CODIGO ;
+                INTO CURSOR UniqueProducts
+            WriteLog("DEBUG PrepareProducts: Using FIRST occurrence strategy (MIN RECNO)")
+            
+            * OPTION 2: Last occurrence (MAX RECNO) - COMMENTED OUT
+            * SELECT CODIGO, MAX(RECNO()) as SelectedRecord ;
+            *     FROM Articulos ;
+            *     WHERE UPPER(ALLTRIM(&lcActivoField)) = 'S' ;
+            *     AND UPPER(ALLTRIM(&lcWebField)) = 'S' ;
+            *     AND !EMPTY(ALLTRIM(CODIGO)) ;
+            *     GROUP BY CODIGO ;
+            *     ORDER BY CODIGO ;
+            *     INTO CURSOR UniqueProducts
+            * WriteLog("DEBUG PrepareProducts: Using LAST occurrence strategy (MAX RECNO)")
+            
+            * OPTION 3: Highest PRECIO1 (Best Price Strategy) - COMMENTED OUT
+            * This subquery finds the record with the highest PRECIO1 for each CODIGO
+            * SELECT A.CODIGO, A.RECNO() as SelectedRecord, A.PRECIO1 ;
+            *     FROM Articulos A ;
+            *     WHERE UPPER(ALLTRIM(A.&lcActivoField)) = 'S' ;
+            *     AND UPPER(ALLTRIM(A.&lcWebField)) = 'S' ;
+            *     AND !EMPTY(ALLTRIM(A.CODIGO)) ;
+            *     AND A.RECNO() = (SELECT TOP 1 B.RECNO() ;
+            *                      FROM Articulos B ;
+            *                      WHERE B.CODIGO = A.CODIGO ;
+            *                      AND UPPER(ALLTRIM(B.&lcActivoField)) = 'S' ;
+            *                      AND UPPER(ALLTRIM(B.&lcWebField)) = 'S' ;
+            *                      ORDER BY B.PRECIO1 DESC) ;
+            *     ORDER BY A.CODIGO ;
+            *     INTO CURSOR UniqueProducts
+            * WriteLog("DEBUG PrepareProducts: Using HIGHEST PRECIO1 strategy")
+            
+            * Alternative OPTION 3 syntax (if the above doesn't work in your VFP version):
+            * SELECT CODIGO, MAX(PRECIO1) as MaxPrice ;
+            *     FROM Articulos ;
+            *     WHERE UPPER(ALLTRIM(&lcActivoField)) = 'S' ;
+            *     AND UPPER(ALLTRIM(&lcWebField)) = 'S' ;
+            *     AND !EMPTY(ALLTRIM(CODIGO)) ;
+            *     GROUP BY CODIGO ;
+            *     ORDER BY CODIGO ;
+            *     INTO CURSOR TempMaxPrices
+            * 
+            * SELECT A.CODIGO, A.RECNO() as SelectedRecord, A.PRECIO1 ;
+            *     FROM Articulos A ;
+            *     INNER JOIN TempMaxPrices T ON A.CODIGO = T.CODIGO AND A.PRECIO1 = T.MaxPrice ;
+            *     WHERE UPPER(ALLTRIM(A.&lcActivoField)) = 'S' ;
+            *     AND UPPER(ALLTRIM(A.&lcWebField)) = 'S' ;
+            *     GROUP BY A.CODIGO ;
+            *     ORDER BY A.CODIGO ;
+            *     INTO CURSOR UniqueProducts
+            * USE IN TempMaxPrices
+            * WriteLog("DEBUG PrepareProducts: Using HIGHEST PRECIO1 strategy (alternative syntax)")
+            
+            * ========== END DEDUPLICATION STRATEGY OPTIONS ==========
+            
+            lnCount = _TALLY  && Number of unique products found
+            WriteLog("DEBUG PrepareProducts: SQL found " + TRANSFORM(lnCount) + " unique products")
+            
             IF lnCount > 0
-                WriteLog("- Encontrados " + TRANSFORM(lnCount) + " productos activos para web")
-                LOCAL lcProductCode
-                lnIndex = 0
+                WriteLog("- Encontrados " + TRANSFORM(lnCount) + " productos únicos activos para web")
+                LOCAL lcProductCode, lnExcludedCount
+                lnExcludedCount = 0
                 
-                * Process matching records
-                GO TOP
+                * Process unique records from cursor
+                SELECT UniqueProducts
                 SCAN ALL
-                    IF RecordMatchesCriteria(lcActivoField, lcWebField)
-                        lnIndex = lnIndex + 1
-                        lcProductCode = ALLTRIM(Articulos.CODIGO)
-                        IF !EMPTY(lcProductCode)
-                            * Check for duplicates before adding
-                            IF ShouldAddProduct(lcProductCode, "current_record")
-                                IF EMPTY(gcProductList)
-                                    gcProductList = lcProductCode
-                                ELSE
-                                    gcProductList = gcProductList + "," + lcProductCode
-                                ENDIF
-                                
-                                gnProductCount = gnProductCount + 1
-                                
-                                * Debug para los primeros 5 productos únicos
-                                IF gnProductCount <= 5
-                                    WriteLog("DEBUG PrepareProducts: Producto único " + TRANSFORM(gnProductCount) + ": '" + lcProductCode + "'")
-                                ENDIF
-                            ELSE
-                                * Product was skipped due to duplication - log it
-                                WriteLog("DUPLICADO saltado: " + lcProductCode)
-                            ENDIF
-                        ELSE
-                            WriteLog("ADVERTENCIA PrepareProducts: Producto " + TRANSFORM(lnIndex) + " tiene código vacío")
-                        ENDIF
+                    lcProductCode = ALLTRIM(UniqueProducts.CODIGO)
+                    
+                    * Add to product list (no duplicate check needed - SQL already handled it)
+                    IF EMPTY(gcProductList)
+                        gcProductList = lcProductCode
+                    ELSE
+                        gcProductList = gcProductList + "," + lcProductCode
+                    ENDIF
+                    
+                    gnProductCount = gnProductCount + 1
+                    
+                    * Debug for first 5 unique products
+                    IF gnProductCount <= 5
+                        WriteLog("DEBUG PrepareProducts: Producto único " + TRANSFORM(gnProductCount) + ": '" + lcProductCode + "'")
                     ENDIF
                 ENDSCAN
+                
+                * Clean up cursor
+                IF USED("UniqueProducts")
+                    USE IN UniqueProducts
+                ENDIF
+                
                 lnResult = gnProductCount  && Use actual unique product count
                 
-                * Verificar que se hayan cargado productos
+                * Log results
                 IF lnResult > 0 AND !EMPTY(gcProductList)
-                    WriteLog("- Lista de productos preparada exitosamente")
-                    WriteLog("PrepareProducts: RESULTADOS - Registros procesados: " + TRANSFORM(lnIndex))
-                    WriteLog("PrepareProducts: RESULTADOS - Productos únicos: " + TRANSFORM(gnProductCount))
-                    WriteLog("PrepareProducts: RESULTADOS - Duplicados eliminados: " + TRANSFORM(lnIndex - gnProductCount))
+                    WriteLog("- Lista de productos preparada exitosamente con SQL deduplication")
+                    WriteLog("PrepareProducts: RESULTADOS - Productos únicos encontrados: " + TRANSFORM(lnCount))
+                    WriteLog("PrepareProducts: RESULTADOS - Productos excluidos: " + TRANSFORM(lnExcludedCount))
+                    WriteLog("PrepareProducts: RESULTADOS - Productos finales: " + TRANSFORM(gnProductCount))
+                    WriteLog("PrepareProducts: RESULTADOS - Duplicados eliminados por SQL: " + TRANSFORM(lnCount - gnProductCount + lnExcludedCount))
                     WriteLog("PrepareProducts: SALIDA - Lista length: " + TRANSFORM(LEN(gcProductList)))
                     WriteLog("PrepareProducts: SALIDA - Primer producto: '" + LEFT(gcProductList, AT(",", gcProductList + ",") - 1) + "'")
                     WriteLog("PrepareProducts: SALIDA - Primeros 100 chars: '" + LEFT(gcProductList, 100) + "'")
@@ -759,7 +814,7 @@ PROCEDURE GetSyncStatus(lcApiBase, lcSyncId)
                 WriteLog("- Estado actual: " + lcStatus)
                 
                 * Si el estado es terminal, terminar el polling
-                IF lcStatus = "Completed" OR lcStatus = "Failed" OR lcStatus = "Error"
+                IF lcStatus = "Completed" OR lcStatus = "Failed" OR lcStatus = "ready"
                     llFinished = .T.
                     lcResult = lcStatus
                 ELSE
@@ -926,7 +981,7 @@ TRY
     ENDIF
     
     * Now parse the JSON string
-    lcStart = '"Status":"'
+    lcStart = '"status":"'
     lnStart = AT(lcStart, lcJsonResponse)
     
     IF lnStart > 0
@@ -949,36 +1004,6 @@ ENDTRY
 RETURN lcStatus
 ENDFUNC
 
-
-* Save product list to disk for debugging purposes
-PROCEDURE SaveDebugProductList()
-    LOCAL lcDebugFile, lnHandle, lcContent
-    
-    IF EMPTY(gcProductList)
-        RETURN
-    ENDIF
-    
-    TRY
-        lcDebugFile = gcDebugFolder + "debug_products_list.txt"
-        
-        * Create readable content
-        lcContent = "=== DEBUG: Lista de Productos ===" + CHR(13) + CHR(10)
-        lcContent = lcContent + "Total productos: " + TRANSFORM(gnProductCount) + CHR(13) + CHR(10)
-        lcContent = lcContent + "Lista completa: " + CHR(13) + CHR(10)
-        lcContent = lcContent + STRTRAN(gcProductList, ",", CHR(13) + CHR(10))
-        
-        lnHandle = FCREATE(lcDebugFile)
-        IF lnHandle > 0
-            FWRITE(lnHandle, lcContent)
-            FCLOSE(lnHandle)
-            WriteLog("DEBUG: Lista de productos guardada en " + lcDebugFile)
-        ELSE
-            WriteLog("ERROR DEBUG: No se pudo crear archivo de lista de productos")
-        ENDIF
-    CATCH TO loError
-        WriteLog("ERROR DEBUG SaveProductList: " + loError.Message)
-    ENDTRY
-ENDPROC
 
 * Force close all DBF files to prevent locks
 PROCEDURE ForceCloseAllDbfs()
@@ -1243,336 +1268,6 @@ FUNCTION ExtractProductsFromRange(lnStart, lnEnd)
     RETURN lcResult
 ENDFUNC
 
-* Helper function to remove a specific product code from the global list
-PROCEDURE RemoveProductFromList(lcProductCode)
-    LOCAL lnStartPos, lnEndPos, lcBeforeCode, lcAfterCode
-    
-    IF EMPTY(gcProductList) OR EMPTY(lcProductCode)
-        RETURN
-    ENDIF
-    
-    TRY
-        * Find and remove the product code from the list
-        lnStartPos = AT("," + lcProductCode + ",", "," + gcProductList + ",")
-        IF lnStartPos = 1
-            * It's the first item in the list
-            lnEndPos = AT(",", gcProductList + ",")
-            IF lnEndPos > LEN(gcProductList)
-                * Only item in list
-                gcProductList = ""
-                gnProductCount = 0
-            ELSE
-                * Remove first item and comma
-                gcProductList = SUBSTR(gcProductList, lnEndPos + 1)
-                gnProductCount = gnProductCount - 1
-            ENDIF
-        ELSE
-            * It's in the middle or end of the list
-            lnStartPos = AT("," + lcProductCode, gcProductList)
-            IF lnStartPos > 0
-                lnEndPos = AT(",", gcProductList + ",", lnStartPos + 1)
-                IF lnEndPos > LEN(gcProductList)
-                    * It's the last item - remove comma and item
-                    gcProductList = LEFT(gcProductList, lnStartPos - 1)
-                    gnProductCount = gnProductCount - 1
-                ELSE
-                    * It's in the middle - remove item but keep comma structure
-                    lcBeforeCode = LEFT(gcProductList, lnStartPos - 1)
-                    lcAfterCode = SUBSTR(gcProductList, lnEndPos)
-                    gcProductList = lcBeforeCode + lcAfterCode
-                    gnProductCount = gnProductCount - 1
-                ENDIF
-            ENDIF
-        ENDIF
-        
-        WriteLog("DEBUG RemoveProductFromList: Removido " + lcProductCode + ", count=" + TRANSFORM(gnProductCount))
-        
-    CATCH TO loError
-        WriteLog("ERROR RemoveProductFromList: " + loError.Message)
-    ENDTRY
-ENDPROC
-
-* Helper function to check if product code already exists and handle duplicates
-* Returns .T. if we should add this product, .F. if it's a duplicate we should skip
-FUNCTION ShouldAddProduct(lcProductCode, lcCurrentRecord)
-    LOCAL llShouldAdd, lnExistingPos, lcExistingCode
-    LOCAL llCurrentBetter, lcCheckCode, lcCheckList
-    
-    * Validate input
-    IF EMPTY(lcProductCode)
-        WriteLog("ERROR ShouldAddProduct: Código de producto vacío")
-        RETURN .F.
-    ENDIF
-    
-    * Normalize the strategy to uppercase for comparison
-    LOCAL lcStrategy
-    lcStrategy = UPPER(ALLTRIM(gcDedupeStrategy))
-    
-    * Check deduplication strategy - NEVER allow NONE to prevent API errors
-    IF lcStrategy = "NONE"
-        WriteLog("ADVERTENCIA: Estrategia NONE ignorada - usando FIRST para prevenir errores de API")
-        lcStrategy = "FIRST"
-    ENDIF
-    
-    llShouldAdd = .T.  && Default: add the product
-    
-    * Check if this code already exists in our list
-    IF !EMPTY(gcProductList)
-        * Simple check: look for the exact code in the comma-separated list
-        * We need to be careful about partial matches, so we check with commas
-        lcCheckCode = "," + ALLTRIM(UPPER(lcProductCode)) + ","
-        lcCheckList = "," + UPPER(gcProductList) + ","
-        
-        IF AT(lcCheckCode, lcCheckList) > 0
-            * Duplicate found! Apply strategy
-            WriteLog("DUPLICADO encontrado: " + lcProductCode + " - Estrategia: " + lcStrategy)
-            
-            DO CASE
-                CASE lcStrategy = "FIRST"
-                    * Keep the first occurrence (skip this duplicate)
-                    llShouldAdd = .F.
-                    WriteLog("DUPLICADO descartado: " + lcProductCode + " (manteniendo el primero)")
-                    
-                CASE lcStrategy = "LAST"
-                    * Replace the existing one with this one
-                    * First remove the existing occurrence
-                    RemoveProductFromList(lcProductCode)
-                    llShouldAdd = .T.
-                    WriteLog("DUPLICADO reemplazado: " + lcProductCode + " (manteniendo el último)")
-                    
-                CASE lcStrategy = "QUALITY"
-                    * Use the advanced quality-based comparison
-                    RETURN ShouldAddProductAdvanced(lcProductCode)
-                    
-                OTHERWISE
-                    * Unknown strategy - default to FIRST for safety
-                    llShouldAdd = .F.
-                    WriteLog("DUPLICADO descartado: " + lcProductCode + " (estrategia desconocida '" + lcStrategy + "', usando FIRST)")
-            ENDCASE
-        ENDIF
-    ENDIF
-    
-    RETURN llShouldAdd
-ENDFUNC
-
-* Advanced version: Compare two product records and return .T. if current is better
-FUNCTION IsCurrentProductBetter(lcProductCode)
-    LOCAL llCurrentBetter, lnQualityScore, lnCurrentScore
-    
-    * Quality scoring system - higher score = better product
-    * We'll assign points for various quality indicators
-    
-    llCurrentBetter = .F.  && Default: current is not better
-    lnCurrentScore = 0
-    
-    TRY
-        * Score the current record based on multiple quality criteria:
-        
-        * 1. Description quality (0-20 points)
-        IF !EMPTY(Articulos.DESCRIP)
-            LOCAL lnDescLen
-            lnDescLen = LEN(ALLTRIM(Articulos.DESCRIP))
-            IF lnDescLen > 50
-                lnCurrentScore = lnCurrentScore + 20  && Very good description
-            ELSE
-                IF lnDescLen > 20
-                    lnCurrentScore = lnCurrentScore + 15  && Good description
-                ELSE
-                    IF lnDescLen > 5
-                        lnCurrentScore = lnCurrentScore + 10  && Basic description
-                    ELSE
-                        lnCurrentScore = lnCurrentScore + 5   && Minimal description
-                    ENDIF
-                ENDIF
-            ENDIF
-        ENDIF
-        
-        * 2. Price validity (0-15 points)
-        IF TYPE("Articulos.PRECIO1") = "N" AND Articulos.PRECIO1 > 0
-            IF Articulos.PRECIO1 > 100
-                lnCurrentScore = lnCurrentScore + 15  && High value product
-            ELSE
-                IF Articulos.PRECIO1 > 10
-                    lnCurrentScore = lnCurrentScore + 10  && Medium value
-                ELSE
-                    lnCurrentScore = lnCurrentScore + 5   && Low value but valid
-                ENDIF
-            ENDIF
-        ENDIF
-        
-        * 3. Image availability (0-10 points)
-        IF !EMPTY(Articulos.IMAGEN)
-            lnCurrentScore = lnCurrentScore + 10
-        ENDIF
-        
-        * 4. Brand information (0-10 points)
-        IF !EMPTY(Articulos.MARCA)
-            lnCurrentScore = lnCurrentScore + 10
-        ENDIF
-        
-        * 5. Category/Classification data (0-15 points)
-        LOCAL lnCategoryScore
-        lnCategoryScore = 0
-        IF !EMPTY(Articulos.CATEGORIA)
-            lnCategoryScore = lnCategoryScore + 5
-        ENDIF
-        IF !EMPTY(Articulos.RUBRO)
-            lnCategoryScore = lnCategoryScore + 5
-        ENDIF
-        IF !EMPTY(Articulos.VIRTUAL)
-            lnCategoryScore = lnCategoryScore + 5
-        ENDIF
-        lnCurrentScore = lnCurrentScore + lnCategoryScore
-        
-        * 6. Variant data - Colors (0-10 points)
-        LOCAL lnColorCount, lnColorIndex, lcColorField
-        lnColorCount = 0
-        FOR lnColorIndex = 1 TO 9
-            lcColorField = "C" + ALLTRIM(STR(lnColorIndex))
-            IF TYPE("Articulos." + lcColorField) = "C" AND !EMPTY(EVALUATE("Articulos." + lcColorField))
-                lnColorCount = lnColorCount + 1
-            ENDIF
-        ENDFOR
-        IF lnColorCount > 5
-            lnCurrentScore = lnCurrentScore + 10
-        ELSE
-            IF lnColorCount > 2
-                lnCurrentScore = lnCurrentScore + 7
-            ELSE
-                IF lnColorCount > 0
-                    lnCurrentScore = lnCurrentScore + 3
-                ENDIF
-            ENDIF
-        ENDIF
-        
-        * 7. Variant data - Sizes (0-10 points)
-        LOCAL lnSizeCount, lnSizeIndex, lcSizeField
-        lnSizeCount = 0
-        FOR lnSizeIndex = 1 TO 9
-            lcSizeField = "T" + ALLTRIM(STR(lnSizeIndex))
-            IF TYPE("Articulos." + lcSizeField) = "C" AND !EMPTY(EVALUATE("Articulos." + lcSizeField))
-                lnSizeCount = lnSizeCount + 1
-            ENDIF
-        ENDFOR
-        IF lnSizeCount > 5
-            lnCurrentScore = lnCurrentScore + 10
-        ELSE
-            IF lnSizeCount > 2
-                lnCurrentScore = lnCurrentScore + 7
-            ELSE
-                IF lnSizeCount > 0
-                    lnCurrentScore = lnCurrentScore + 3
-                ENDIF
-            ENDIF
-        ENDIF
-        
-        * 8. Special flags (0-10 points)
-        IF Articulos.NOVEDAD = "S"
-            lnCurrentScore = lnCurrentScore + 3  && New product
-        ENDIF
-        IF Articulos.OFERTA = "S"
-            lnCurrentScore = lnCurrentScore + 3  && On sale
-        ENDIF
-        IF Articulos.WEB = "S"
-            lnCurrentScore = lnCurrentScore + 4  && Web enabled
-        ENDIF
-        
-        WriteLog("DEBUG IsCurrentProductBetter: " + lcProductCode + " score=" + TRANSFORM(lnCurrentScore))
-        
-        * For this simple implementation, we consider "better" if score > 50
-        * You can adjust this threshold or implement more sophisticated comparison
-        * against the existing product's score
-        IF lnCurrentScore >= 50
-            llCurrentBetter = .T.
-            WriteLog("DEBUG: Producto " + lcProductCode + " considerado de alta calidad (score=" + TRANSFORM(lnCurrentScore) + ")")
-        ELSE
-            WriteLog("DEBUG: Producto " + lcProductCode + " score bajo (score=" + TRANSFORM(lnCurrentScore) + ")")
-        ENDIF
-        
-    CATCH TO loError
-        WriteLog("ERROR IsCurrentProductBetter: " + loError.Message)
-        llCurrentBetter = .F.
-    ENDTRY
-    
-    RETURN llCurrentBetter
-ENDFUNC
-
-* Enhanced deduplication with quality-based selection
-* This version replaces existing products if the new one is "better"
-FUNCTION ShouldAddProductAdvanced(lcProductCode)
-    LOCAL llShouldAdd, lnExistingPos, lcUpdatedList
-    LOCAL llCurrentBetter, lnStartPos, lnEndPos, lcBeforeCode, lcAfterCode
-    
-    llShouldAdd = .T.  && Default: add the product
-    
-    * Check if this code already exists in our list
-    IF !EMPTY(gcProductList)
-        lcCheckCode = "," + lcProductCode + ","
-        lcCheckList = "," + gcProductList + ","
-        lnExistingPos = AT(lcCheckCode, lcCheckList)
-        
-        IF lnExistingPos > 0
-            * Duplicate found! Compare quality and potentially replace
-            WriteLog("DUPLICADO encontrado: " + lcProductCode + " - Comparando calidad...")
-            
-            * Check if current record is better than the existing one
-            llCurrentBetter = IsCurrentProductBetter(lcProductCode)
-            
-            IF llCurrentBetter
-                * Replace the existing entry with the current one
-                WriteLog("DUPLICADO reemplazado: " + lcProductCode + " (versión actual es mejor)")
-                
-                * Remove the old occurrence from the list
-                * Find the position in the actual list (without added commas)
-                lnExistingPos = AT("," + lcProductCode + ",", "," + gcProductList + ",")
-                IF lnExistingPos = 1
-                    * It's the first item in the list
-                    lnStartPos = 1
-                    lnEndPos = AT(",", gcProductList + ",")
-                    IF lnEndPos > LEN(gcProductList)
-                        * Only item in list
-                        gcProductList = ""
-                    ELSE
-                        * Remove first item and comma
-                        gcProductList = SUBSTR(gcProductList, lnEndPos + 1)
-                    ENDIF
-                ELSE
-                    * It's in the middle or end of the list
-                    lnStartPos = AT("," + lcProductCode, gcProductList)
-                    IF lnStartPos > 0
-                        lnEndPos = AT(",", gcProductList + ",", lnStartPos + 1)
-                        IF lnEndPos > LEN(gcProductList)
-                            * It's the last item - remove comma and item
-                            gcProductList = LEFT(gcProductList, lnStartPos - 1)
-                        ELSE
-                            * It's in the middle - remove item but keep comma structure
-                            lcBeforeCode = LEFT(gcProductList, lnStartPos - 1)
-                            lcAfterCode = SUBSTR(gcProductList, lnEndPos)
-                            gcProductList = lcBeforeCode + lcAfterCode
-                        ENDIF
-                    ENDIF
-                ENDIF
-                
-                * Now add the new (better) version
-                IF EMPTY(gcProductList)
-                    gcProductList = lcProductCode
-                ELSE
-                    gcProductList = gcProductList + "," + lcProductCode
-                ENDIF
-                
-                llShouldAdd = .F.  && Don't add again in the main loop
-                WriteLog("DUPLICADO actualizado en lista: " + lcProductCode)
-            ELSE
-                * Keep the existing one, skip the current
-                llShouldAdd = .F.
-                WriteLog("DUPLICADO descartado: " + lcProductCode + " (versión existente es mejor)")
-            ENDIF
-        ENDIF
-    ENDIF
-    
-    RETURN llShouldAdd
-ENDFUNC
-
 * Report and count currently open DBF files - Returns count of open files
 FUNCTION ReportOpenDbfs()
     LOCAL i, lnOpenFiles, lcAlias, lcOpenFiles
@@ -1694,7 +1389,7 @@ FUNCTION BuildProductsJsonFromList(lcProductList)
                     LOCATE FOR ALLTRIM(ArtTemp.CODIGO) = ALLTRIM(lcProduct)
                     
                     IF FOUND()
-                        WriteLog("   - Producto encontrado en DBF: " + lcProduct)
+                        * WriteLog("   - Producto encontrado en DBF: " + lcProduct)
                         * Build complete JSON with all fields
                         
                         * Extract Variants (Colors C1-C9)

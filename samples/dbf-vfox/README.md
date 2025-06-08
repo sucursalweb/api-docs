@@ -1,14 +1,56 @@
 # Proyecto Visual FoxPro 9: Sincronización con API de SucursalWeb
 
+## 🚀 Uso (¡Empezá aquí!)
+
+### Ejecución rápida:
+1. Ejecuta el programa (el punto de entrada es el procedimiento `Main` que se ejecuta automáticamente).
+2. Para ejecutar el programa manualmente, usa:
+   ```foxpro
+   DO SyncProducts
+   ```
+
+### Configuración inicial obligatoria:
+1. Abre `SyncProducts.prg` en Visual FoxPro 9.
+2. **IMPORTANTE:** Modifica las variables de configuración requeridas en el procedimiento `Main`:
+
+   **A) Credenciales de SucursalWeb (proporcionadas por SucursalWeb):**
+   ```foxpro
+   * En el procedimiento Main, busca estas líneas y reemplaza los valores:
+   gcTenant = "mi-tenant-id"                  && Reemplaza con tu Tenant real
+   gcApiKey = "mi-api-key-secreto"            && Reemplaza con tu Api-Key secreto
+   ```
+
+   **B) Rutas de archivos DBF (configuradas por el desarrollador):**
+   ```foxpro
+   * Ajusta estas rutas según la ubicación de tus archivos DBF:
+   gcArticuloPath = "/samples/dbf-vfox/data/ARTICULO.DBF"  && Ruta a tu DBF de productos
+   gcTablasPath = "/samples/dbf-vfox/data/TABLAS.DBF"      && Ruta a tu DBF de tablas
+   ```
+
+### Configuración opcional:
+Puedes ajustar otros parámetros según tus necesidades:
+```foxpro
+* Configuración de procesamiento
+gnBatchSize = 200                              && Tamaño de lote (productos por envío)
+gnIvaRate = 1.21                               && Multiplicador de IVA (21%)
+
+* Archivos de salida
+gcLogFile = "/samples/dbf-vfox/synclog.txt"    && Archivo de log
+```
+
+**Cambio de estrategia de deduplicación:**
+El programa incluye tres estrategias SQL para manejar productos duplicados (FIRST, LAST, HIGHEST_PRICE). La estrategia FIRST está activa por defecto y es la recomendada para la mayoría de casos. Si necesitas una estrategia diferente, edita el código en la función `PrepareProducts()` comentando/descomentando las secciones SQL apropiadas. Ver la sección "Sistema de Deduplicación SQL" para detalles completos.
+
 ## ⚡ Novedades en esta versión
 
 Esta versión incluye mejoras significativas sobre la implementación original:
 
-- **🔄 Sistema de deduplicación avanzado**: Maneja productos duplicados con 4 estrategias configurables
+- **🔄 Sistema de deduplicación SQL directo**: Maneja productos duplicados con 3 estrategias SQL eficientes
 - **🛠️ Herramientas de debugging integradas**: Funciones para diagnosticar y resolver problemas con archivos DBF
-- **⚡ Rendimiento optimizado**: Almacenamiento basado en strings para mejor manejo de memoria
+- **⚡ Rendimiento optimizado**: Almacenamiento basado en strings para mejor manejo de memoria  
 - **🔧 Limpieza automática**: Sistema robusto de limpieza de archivos DBF en caso de errores
 - **📊 Configuración centralizada**: Variables globales en lugar de constantes para mayor flexibilidad
+- **🚀 Arquitectura simplificada**: Eliminación de código legacy y enfoque en SQL directo
 
 ## Resumen para Desarrolladores VFP
 
@@ -40,10 +82,11 @@ Este proyecto demuestra cómo leer productos desde un archivo DBF y sincronizarl
 - Aplica cálculo de IVA (21% por defecto) sobre los precios.
 - Utiliza `WinHttp.WinHttpRequest.5.1` para las solicitudes HTTP.
 - Implementa manejo de errores y registro de logs para mejor seguimiento.
-- **NUEVO**: Sistema avanzado de deduplicación con múltiples estrategias configurables.
+- **NUEVO**: Sistema de deduplicación SQL directo con 3 estrategias configurables (FIRST, LAST, HIGHEST_PRICE).
 - **NUEVO**: Herramientas de debugging integradas para manejo de archivos DBF.
 - **NUEVO**: Almacenamiento optimizado de productos basado en strings para mejor rendimiento.
 - **NUEVO**: Sistema robusto de limpieza automática de archivos DBF en caso de errores.
+- **NUEVO**: Arquitectura simplificada sin código legacy de deduplicación en memoria.
 
 ## Estructura del programa
 
@@ -51,7 +94,7 @@ El programa está organizado en un módulo principal con punto de entrada explí
 
 ### Procedimientos principales:
 - `PROCEDURE Main`: Punto de entrada principal que coordina el flujo completo de sincronización
-- `PROCEDURE PrepareProducts`: Prepara la lista de productos desde el archivo DBF
+- `FUNCTION PrepareProducts`: Prepara la lista de productos desde el archivo DBF con deduplicación SQL
 - `PROCEDURE UploadProductBatches`: Sube los productos en lotes
 - `PROCEDURE InitSync`: Inicializa la sincronización y obtiene el ID (Paso 1)
 - `PROCEDURE UploadBatch`: Sube un lote de productos (Paso 2)
@@ -60,15 +103,17 @@ El programa está organizado en un módulo principal con punto de entrada explí
 
 ### Funciones de utilidad:
 - `FUNCTION CheckInternetConnection`: Verifica conectividad antes de iniciar
-- `FUNCTION ShouldAddProduct`: Maneja estrategias de deduplicación
 - `FUNCTION ExtractProductsFromRange`: Extrae lotes de productos de manera eficiente
 - `FUNCTION BuildProductsJsonFromList`: Construye JSON desde la lista de productos
 - `FUNCTION LookupTablas`: Busca descripciones en TABLAS.DBF
+- `FUNCTION FindFieldByPattern`: Encuentra campos por patrón (ACTIVO/WEB)
+- `FUNCTION RecordMatchesCriteria`: Verifica si un registro cumple los criterios
+- `FUNCTION VerifyNoDuplicates`: Verifica la ausencia de duplicados en la lista final
 
 ### Herramientas de debugging:
-- `PROCEDURE CheckDbfStatus`: Muestra archivos DBF abiertos
-- `PROCEDURE EmergencyCleanup`: Cierra todos los archivos DBF
-- `PROCEDURE ForceClose`: Cierra un alias específico
+- `PROCEDURE ForceCloseAllDbfs`: Cierra todos los archivos DBF forzadamente
+- `PROCEDURE EmergencyDbfCleanup`: Limpieza de emergencia de archivos DBF
+- `PROCEDURE HandleDbfError`: Maneja errores específicos de DBF
 - `FUNCTION ReportOpenDbfs`: Reporta y cuenta archivos DBF abiertos
 
 ### ¿Por qué usamos lotes (batches)?
@@ -85,45 +130,123 @@ En las aplicaciones VFP tradicionales, cuando trabajamos con grandes cantidades 
 
 Por estas razones, el procedimiento `UploadProductBatches` divide tu lista completa de productos en grupos más pequeños (por defecto, 200 productos por lote) y los envía secuencialmente. Es como enviar varias cajas pequeñas en lugar de un camión completo de mercadería.
 
-## Sistema de Deduplicación
+## Sistema de Deduplicación SQL
 
-El programa incluye un sistema avanzado para manejar productos duplicados (con el mismo CODIGO). Esto es especialmente útil cuando tu base de datos contiene registros duplicados o quieres aplicar reglas específicas para decidir cuál versión conservar.
+El programa incluye un sistema de deduplicación basado en SQL para manejar productos duplicados (con el mismo CODIGO). Cuando tu archivo DBF contiene múltiples registros con el mismo código de producto, el sistema automáticamente selecciona uno de ellos según la estrategia configurada.
 
 ### Estrategias disponibles:
-- **"FIRST"** (por defecto): Conserva la primera ocurrencia, ignora duplicados posteriores. Es la más rápida.
-- **"LAST"**: Conserva la última ocurrencia, reemplaza las anteriores.
-- **"QUALITY"**: Compara la calidad de los registros y conserva el mejor. Evalúa:
-  - Longitud de la descripción
-  - Precios válidos
-  - Presencia de imágenes
-  - Variantes disponibles
-  - Categorías asignadas
-- **"NONE"**: Sin deduplicación (comportamiento original, puede causar errores en la API)
 
-### Configuración:
+El código viene con tres estrategias pre-implementadas. La estrategia FIRST está activa por defecto, pero puedes elegir la que mejor se adapte a tu negocio:
+
+#### **OPCIÓN 1: Primera ocurrencia (MIN RECNO)** - ACTIVA POR DEFECTO
 ```foxpro
-* En el procedimiento Main
-gcDedupeStrategy = "FIRST"  && Cambiar por: "LAST", "QUALITY" o "NONE"
+SELECT CODIGO, MIN(RECNO()) as SelectedRecord ;
+    FROM Articulos ;
+    WHERE UPPER(ALLTRIM(&lcActivoField)) = 'S' ;
+    AND UPPER(ALLTRIM(&lcWebField)) = 'S' ;
+    AND !EMPTY(ALLTRIM(CODIGO)) ;
+    GROUP BY CODIGO ;
+    ORDER BY CODIGO ;
+    INTO CURSOR UniqueProducts
 ```
+**Conserva**: La primera ocurrencia encontrada de cada CODIGO  
+**Ventajas**: Más rápida, simple y predecible  
+**Recomendada para**: La mayoría de casos de uso
 
-La estrategia "FIRST" es recomendada para la mayoría de casos por su velocidad y simplicidad. Usa "QUALITY" si necesitas garantizar que se conserven los registros más completos.
+#### **OPCIÓN 2: Última ocurrencia (MAX RECNO)** - COMENTADA
+```foxpro
+SELECT CODIGO, MAX(RECNO()) as SelectedRecord ;
+    FROM Articulos ;
+    WHERE UPPER(ALLTRIM(&lcActivoField)) = 'S' ;
+    AND UPPER(ALLTRIM(&lcWebField)) = 'S' ;
+    AND !EMPTY(ALLTRIM(CODIGO)) ;
+    GROUP BY CODIGO ;
+    ORDER BY CODIGO ;
+    INTO CURSOR UniqueProducts
+```
+**Conserva**: La última ocurrencia encontrada de cada CODIGO  
+**Ventajas**: Útil cuando los registros más recientes son mejores  
+**Recomendada para**: Cuando los datos se actualizan por append
+
+#### **OPCIÓN 3: Precio más alto (HIGHEST PRECIO1)** - COMENTADA
+```foxpro
+SELECT A.CODIGO, A.RECNO() as SelectedRecord, A.PRECIO1 ;
+    FROM Articulos A ;
+    WHERE UPPER(ALLTRIM(A.&lcActivoField)) = 'S' ;
+    AND UPPER(ALLTRIM(A.&lcWebField)) = 'S' ;
+    AND !EMPTY(ALLTRIM(A.CODIGO)) ;
+    AND A.RECNO() = (SELECT TOP 1 B.RECNO() ;
+                     FROM Articulos B ;
+                     WHERE B.CODIGO = A.CODIGO ;
+                     AND UPPER(ALLTRIM(B.&lcActivoField)) = 'S' ;
+                     AND UPPER(ALLTRIM(B.&lcWebField)) = 'S' ;
+                     ORDER BY B.PRECIO1 DESC) ;
+    ORDER BY A.CODIGO ;
+    INTO CURSOR UniqueProducts
+```
+**Conserva**: El registro con el PRECIO1 más alto para cada CODIGO  
+**Ventajas**: Garantiza que se conserven los productos con mejor precio  
+**Recomendada para**: Cuando el precio es el factor más importante
+
+### Cómo elegir una estrategia diferente:
+
+Si la estrategia FIRST (por defecto) no es la adecuada para tu caso, puedes elegir otra:
+
+1. Abrir `SyncProducts.prg`
+2. Buscar la sección "DEDUPLICATION STRATEGY OPTIONS" en `PrepareProducts()`
+3. Comentar la estrategia FIRST actual (agregar `*` al inicio de las líneas)
+4. Descoomentar la estrategia deseada (quitar `*` del inicio de las líneas)
+5. Asegurarse de que solo UNA estrategia esté activa
+
+**Ejemplo para usar la estrategia LAST en lugar de FIRST:**
+```foxpro
+* OPTION 1: First occurrence (MIN RECNO) - COMMENTED OUT
+* SELECT CODIGO, MIN(RECNO()) as SelectedRecord ;
+*     FROM Articulos ;
+*     WHERE UPPER(ALLTRIM(&lcActivoField)) = 'S' ;
+*     AND UPPER(ALLTRIM(&lcWebField)) = 'S' ;
+*     AND !EMPTY(ALLTRIM(CODIGO)) ;
+*     GROUP BY CODIGO ;
+*     ORDER BY CODIGO ;
+*     INTO CURSOR UniqueProducts
+
+* OPTION 2: Last occurrence (MAX RECNO) - NOW ACTIVE
+SELECT CODIGO, MAX(RECNO()) as SelectedRecord ;
+    FROM Articulos ;
+    WHERE UPPER(ALLTRIM(&lcActivoField)) = 'S' ;
+    AND UPPER(ALLTRIM(&lcWebField)) = 'S' ;
+    AND !EMPTY(ALLTRIM(CODIGO)) ;
+    GROUP BY CODIGO ;
+    ORDER BY CODIGO ;
+    INTO CURSOR UniqueProducts
+WriteLog("DEBUG PrepareProducts: Using LAST occurrence strategy (MAX RECNO)")
+```
 
 ## Herramientas de Debugging para DBF
 
-Si experimentas problemas con archivos DBF que quedan abiertos después de errores, el programa incluye herramientas de debugging que puedes usar desde la ventana de comandos de VFP:
+Si experimentas problemas con archivos DBF que quedan abiertos después de errores, el programa incluye herramientas de debugging automáticas que se ejecutan al inicio y funciones que puedes usar manualmente:
+
+### Funciones automáticas:
+- **Verificación inicial**: Al iniciar, el programa verifica automáticamente si hay archivos DBF abiertos
+- **Limpieza inicial**: Si encuentra archivos abiertos, ejecuta limpieza automática  
+- **Manejo de errores**: Cada operación DBF incluye manejo de errores y limpieza
+
+### Funciones manuales disponibles:
+Las siguientes funciones están disponibles durante la ejecución del programa:
 
 ```foxpro
-CheckDbfStatus()        && Ver qué archivos están abiertos
-EmergencyCleanup()      && Cerrar todos los archivos DBF
-ForceClose("Alias")     && Cerrar un alias específico
+ReportOpenDbfs()           && Ver qué archivos están abiertos y contarlos
+ForceCloseAllDbfs()        && Cerrar todos los archivos DBF forzadamente  
+EmergencyDbfCleanup()      && Limpieza de emergencia (método más robusto)
+HandleDbfError()           && Manejo específico de errores DBF
 ```
 
 **Ejemplo de uso cuando algo falla:**
 1. Abrir ventana de comandos (Ctrl+F2)
-2. Escribir: `EmergencyCleanup()`
+2. Escribir: `EmergencyDbfCleanup()`
 3. Presionar Enter
 
-Estas funciones están disponibles automáticamente cuando ejecutas el programa.
+Estas funciones están disponibles automáticamente cuando ejecutas el programa y utilizan técnicas robustas para cerrar archivos incluso en situaciones de error.
 
 ## Optimizaciones de Rendimiento
 
@@ -190,45 +313,6 @@ Los productos se envían a la API en formato JSON con la siguiente estructura:
 }
 ```
 
-## Configuración y Uso
-
-### Configuración inicial:
-1. Abre `SyncProducts.prg` en Visual FoxPro 9.
-2. **IMPORTANTE:** Modifica las variables de configuración en el procedimiento `Main` con los valores que te proporcionó SucursalWeb:
-   ```foxpro
-   * En el procedimiento Main, busca estas líneas y reemplaza los valores:
-   gcTenant = "mi-tenant-id"                  && Reemplaza con tu Tenant real
-   gcApiKey = "mi-api-key-secreto"            && Reemplaza con tu Api-Key secreto
-   ```
-
-### Configuración opcional:
-Puedes ajustar otros parámetros según tus necesidades:
-```foxpro
-* Rutas de archivos
-gcArticuloPath = "/samples/dbf-vfox/data/ARTICULO.DBF"  && Ruta a tu DBF de productos
-gcTablasPath = "/samples/dbf-vfox/data/TABLAS.DBF"      && Ruta a tu DBF de tablas
-
-* Configuración de procesamiento
-gnBatchSize = 200                              && Tamaño de lote (productos por envío)
-gnIvaRate = 1.21                               && Multiplicador de IVA (21%)
-
-* Estrategia de deduplicación
-gcDedupeStrategy = "FIRST"                     && "FIRST", "LAST", "QUALITY" o "NONE"
-
-* Archivos de salida
-gcLogFile = "/samples/dbf-vfox/synclog.txt"    && Archivo de log
-gcDebugFolder = "/samples/dbf-vfox/"           && Carpeta para archivos de debug
-```
-
-### Ejecución:
-1. Ejecuta el programa (el punto de entrada es el procedimiento `Main` que se ejecuta automáticamente).
-2. Para ejecutar el programa manualmente, usa:
-   ```foxpro
-   DO SyncProducts
-   ```
-
-El programa automáticamente llama al procedimiento `Main` como punto de entrada.
-
 ## Sistema de Logs y Manejo de Errores
 
 El programa implementa un sistema de registro de logs y manejo de errores robusto:
@@ -257,9 +341,10 @@ El programa incluye verificaciones automáticas del estado de archivos DBF y lim
 
 ```foxpro
 * Estas funciones están disponibles durante la ejecución:
-CheckDbfStatus()        && Verificar archivos abiertos
-EmergencyCleanup()      && Limpieza de emergencia
-ReportOpenDbfs()        && Reportar estado actual
+ReportOpenDbfs()           && Verificar archivos abiertos y contarlos
+ForceCloseAllDbfs()        && Cerrar todos los archivos DBF forzadamente
+EmergencyDbfCleanup()      && Limpieza de emergencia más robusta
+HandleDbfError()           && Manejo específico de errores DBF
 ```
 
 El registro está habilitado por defecto (`llLogEnabled = .T.`) pero puede desactivarse fácilmente cuando no sea necesario, como en entornos de producción donde se requiera mayor velocidad de ejecución.
@@ -299,8 +384,10 @@ Si usás una versión de Windows muy antigua, podrías necesitar instalarlo manu
 ### Funcionalidades implementadas:
 - El flujo completo de sincronización (inicialización, carga de lotes, solicitud y consulta de estado) ya está implementado.
 - El programa aplica automáticamente el IVA (configurable, 21% por defecto) a los precios mediante la variable `gnIvaRate`.
-- Sistema de deduplicación configurable para manejar productos duplicados.
-- Herramientas de debugging integradas para diagnóstico de problemas con archivos DBF.
+- Sistema de deduplicación SQL directo con tres estrategias configurables (FIRST, LAST, HIGHEST_PRICE).
+- Herramientas de debugging integradas para diagnóstico automático y manual de problemas con archivos DBF.
+- Verificación automática y limpieza de archivos DBF al inicio del programa.
+- Manejo robusto de errores con limpieza automática en cada operación DBF.
 
 ### Estructura de datos procesada:
 La función procesa los campos de la estructura estándar de ARTICULO.DBF incluyendo:
@@ -324,7 +411,9 @@ La función procesa los campos de la estructura estándar de ARTICULO.DBF incluy
   - Attachs: Array vacío para adjuntos
 
 ### Recomendaciones:
-- Configura la estrategia de deduplicación según tus necesidades: "FIRST" para velocidad, "QUALITY" para mejor calidad de datos.
+- La estrategia de deduplicación FIRST (primera ocurrencia) está activa por defecto y es recomendada para la mayoría de casos por su velocidad y simplicidad.
+- Si necesitas una estrategia diferente, edita el código SQL en `PrepareProducts()` según se detalla en la sección "Sistema de Deduplicación SQL".
+- Considera LAST si los registros más recientes son mejores, o HIGHEST_PRICE si el precio es el factor más importante.
 - Prueba el flujo completo con un conjunto pequeño de productos antes de sincronizar todo tu catálogo.
 - Mantén habilitado el sistema de logs durante las pruebas iniciales para facilitar el diagnóstico.
-- Si experimentas problemas con archivos DBF bloqueados, usa las herramientas de debugging integradas (`EmergencyCleanup()`, `CheckDbfStatus()`).
+- El programa incluye verificación automática de archivos DBF al inicio, pero si experimentas problemas, usa `EmergencyDbfCleanup()` desde la ventana de comandos.
