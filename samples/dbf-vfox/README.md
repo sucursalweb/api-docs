@@ -298,11 +298,11 @@ Los productos se envían a la API en formato JSON con la siguiente estructura:
       "OrderedList": ["95", "100", "105", ...]     // T1-T9
     }
   ],
-  "Brand": "ANA GRANT",                  // Marca de TABLAS.DBF (TABLA=14)
+  "Brand": "MARCA",                  // Marca de TABLAS.DBF (TABLA=14)
   "Tags": [
-    "MUJER",                             // Clasificación (TABLA=16, campo CATEGORIA)
-    "CORSETERIA",                        // Rubro (TABLA=13, campo RUBRO)
-    "PROMO INVIERNO"                     // Tag (TABLA=15, campo VIRTUAL)
+    "CLASIFICACION",                             // Clasificación (TABLA=1, campo CLASIFICACION)
+    "CATEGORIA",                        // Rubro (TABLA=2, campo CATEGORIA)
+    "ETIQUETA"                     // Tag (TABLA=3, campo TAG)
   ],
   "IsNew": false,                        // Si NOVEDAD = 'S'
   "IsSale": false,                       // Si OFERTA = 'S'
@@ -310,6 +310,8 @@ Los productos se envían a la API en formato JSON con la siguiente estructura:
   "IsEnabled": true,                     // Si WEB = 'S' y ACTIVO = 'S'
   "Pics": ["ag0108"],                    // Campo IMAGEN
   "Attachs": []                          // Array vacío para adjuntos
+  "Props": [],
+  "Exclusions": []
 }
 ```
 
