@@ -309,7 +309,7 @@ Los productos se envían a la API en formato JSON con la siguiente estructura:
   "IsUnavailable": false,                // Si PROXIMO = 'S'
   "IsEnabled": true,                     // Si WEB = 'S' y ACTIVO = 'S'
   "Pics": ["ag0108"],                    // Campo IMAGEN
-  "Attachs": []                          // Array vacío para adjuntos
+  "Attachs": [],                          // Array vacío para adjuntos
   "Props": [],
   "Exclusions": []
 }
