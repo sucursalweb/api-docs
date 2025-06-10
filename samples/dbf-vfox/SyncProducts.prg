@@ -5,6 +5,11 @@
 * === DEDUPLICATION STRATEGIES ===
 * The script now handles duplicate CODIGO entries with direct SQL filtering
 *
+* === VARIANT PROCESSING ===
+* - Extracts Variants (Color/Talle) from COMBINA.DBF using TABLAS.DBF lookups
+* - Extracts Exclusions (out-of-stock combos) based on Cantidad field <= 0
+* - Color descriptions from TABLAS where Tabla=21
+* - Talle descriptions from TABLAS where Tabla=20
 *
 * === DEBUGGING AYUDA ===
 * Si los archivos DBF quedan abiertos después de un error, puedes usar estas funciones
@@ -1041,7 +1046,7 @@ PROCEDURE ForceCloseAllDbfs()
         ENDFOR
         
         * Second pass: Close by known aliases (in case some remain)
-        LOCAL ARRAY laKnownAliases[7]
+        LOCAL ARRAY laKnownAliases[9]
         laKnownAliases[1] = "Articulos"
         laKnownAliases[2] = "ArtTemp"
         laKnownAliases[3] = "Tablas"
@@ -1049,6 +1054,8 @@ PROCEDURE ForceCloseAllDbfs()
         laKnownAliases[5] = "TablasLookup"
         laKnownAliases[6] = "TablasTemp"
         laKnownAliases[7] = "CombinaTemp"
+        laKnownAliases[8] = "CombinaExclusions"
+        laKnownAliases[9] = "UniqueProducts"
         
         FOR i = 1 TO ALEN(laKnownAliases)
             TRY
@@ -1325,7 +1332,7 @@ ENDFUNC
 FUNCTION BuildProductsJsonFromList(lcProductList)
     LOCAL lcJson, lcCurrentProduct, lnProcessed
     LOCAL lnCurrentPos, lcProduct, lnCommaPos
-    LOCAL lcVariants, lcColors, lcTalles, lcBrand, lcTags, lcPics
+    LOCAL lcVariants, lcColors, lcTalles, lcBrand, lcTags, lcPics, lcExclusions
     LOCAL llIsNew, llIsSale, llIsUnavailable, llIsEnabled
     LOCAL lnI, lcField, lcValue, lcBrandDesc, lcTagDesc
     LOCAL lcMarcaValue, lcCategoriaValue, lcRubroValue, lcVirtualValue
@@ -1399,6 +1406,9 @@ FUNCTION BuildProductsJsonFromList(lcProductList)
                         
                         * Extract Variants from COMBINA.DBF (replaces old C1-C9, T1-T9 logic)
                         lcVariants = ExtractVariantsFromCombina(lcProduct)
+                        
+                        * Extract Exclusions from COMBINA.DBF based on stock quantity
+                        lcExclusions = ExtractExclusionsFromCombina(lcProduct)
                         
                         * Get Brand from MARCA field (lookup in table 14)
                         lcBrand = "null"
@@ -1517,7 +1527,7 @@ FUNCTION BuildProductsJsonFromList(lcProductList)
                         lcCurrentProduct = lcCurrentProduct + '"IsEnabled":' + IIF(llIsEnabled, "true", "false") + ','
                         lcCurrentProduct = lcCurrentProduct + '"Pics":[' + lcPics + '],'
                         lcCurrentProduct = lcCurrentProduct + '"Attachs":[],'
-                        lcCurrentProduct = lcCurrentProduct + '"Exclusions":[]'
+                        lcCurrentProduct = lcCurrentProduct + '"Exclusions":' + lcExclusions
                         lcCurrentProduct = lcCurrentProduct + "}"
                         
                         IF lnProcessed > 0
@@ -1631,6 +1641,7 @@ FUNCTION VerifyNoDuplicates()
     * Check each product against all others
     FOR lnI = 1 TO lnProducts
         lcCurrentCode = ALLTRIM(UPPER(laProducts[lnI]))
+
         IF !EMPTY(lcCurrentCode)
             FOR lnJ = lnI + 1 TO lnProducts
                 lcCompareCode = ALLTRIM(UPPER(laProducts[lnJ]))
@@ -1681,7 +1692,7 @@ FUNCTION ExtractVariantsFromCombina(lcArticleCodigo)
     TRY
         * Check if COMBINA.DBF exists
         IF !FILE(gcCombinaPath)
-            WriteLog("   INFO ExtractVariantsFromCombina[" + lcArticleCodigo + "]: COMBINA.DBF no encontrado - usando variants vacíos")
+            WriteLog("   INFO ExtractVariantsFromCombina[" + lcArticleCodigo + "]: COMBINA.DBF no encontrado - usando variants vacías")
             RETURN '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]'
         ENDIF
         
@@ -1716,7 +1727,6 @@ FUNCTION ExtractVariantsFromCombina(lcArticleCodigo)
         
         IF !llValidStructure
             USE IN (lcCombinaAlias)
-            WriteLog("   INFO: Continuando con variants vacíos para este artículo debido a estructura inválida")
             RETURN '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]'
         ENDIF
         
@@ -1802,8 +1812,8 @@ FUNCTION ExtractVariantsFromCombina(lcArticleCodigo)
                             * Try TABLAS lookup with error handling
                             TRY
                                 lcColorDesc = LookupTablas(21, lcCurrentColor)
-                            CATCH TO loLookupError
-                                WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error en lookup Color '" + lcCurrentColor + "' - " + loLookupError.Message)
+                            CATCH TO loColorError
+                                WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error en lookup Color '" + lcCurrentColor + "' - " + loColorError.Message)
                                 lcColorDesc = ""  && Use empty description on lookup error
                             ENDTRY
                             
@@ -1915,9 +1925,200 @@ FUNCTION ExtractVariantsFromCombina(lcArticleCodigo)
     ELSE
         * LOCAL lnColorCount, lnTalleCount
         * lnColorCount = IIF(EMPTY(lcColors), 0, OCCURS(",", lcColors) + 1)
-        * lnTalleCount = IIF(EMPTY(lcTalles), 0, OCCURS(",", lcTalles) + 1)
+        * lnTalleCount = IIF(EMPTY(lcTalles), 0, OCCURS(",", lcTalle) + 1)
         * WriteLog("   INFO ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Resultado final - " + TRANSFORM(lnColorCount) + " colores, " + TRANSFORM(lnTalleCount) + " talles")
     ENDIF
     
     RETURN lcVariants
+ENDFUNC
+
+* ================================================================================
+* ExtractExclusionsFromCombina - Extract out-of-stock variant combos from COMBINA.DBF
+* Returns JSON array of variant combinations that have zero or negative stock
+* Format: [[{"Variant":"Color","Value":"ColorName"},{"Variant":"Talle","Value":"TalleName"}], ...]
+* FAULT-TOLERANT: Handles missing articles, corrupt data gracefully
+* ================================================================================
+FUNCTION ExtractExclusionsFromCombina(lcArticleCodigo)
+    LOCAL lcExclusions, lcCombinaAlias, lnExclusionsFound
+    LOCAL lcColorCode, lcTalleCode, lcColorDesc, lcTalleDesc
+    LOCAL lnCantidad, lcCurrentExclusion
+    
+    lcExclusions = ""
+    lcCombinaAlias = "CombinaExclusions"
+    lnExclusionsFound = 0
+    
+    IF EMPTY(lcArticleCodigo)
+        WriteLog("   ADVERTENCIA ExtractExclusionsFromCombina: Código de artículo vacío - usando exclusions vacías")
+        RETURN '[]'
+    ENDIF
+    
+    TRY
+        * Check if COMBINA.DBF exists
+        IF !FILE(gcCombinaPath)
+            WriteLog("   INFO ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: COMBINA.DBF no encontrado - usando exclusions vacías")
+            RETURN '[]'
+        ENDIF
+        
+        * Open COMBINA.DBF with error handling
+        IF USED(lcCombinaAlias)
+            USE IN (lcCombinaAlias)
+        ENDIF
+        
+        TRY
+            USE (gcCombinaPath) IN 0 SHARED ALIAS (lcCombinaAlias)
+        CATCH TO loDbfError
+            WriteLog("   ERROR ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: No se pudo abrir COMBINA.DBF - " + loDbfError.Message)
+            WriteLog("   INFO: Continuando con exclusions vacías para este artículo")
+            RETURN '[]'
+        ENDTRY
+        
+        SELECT (lcCombinaAlias)
+        
+        * Verify DBF structure has required fields
+        LOCAL llValidStructure
+        llValidStructure = .T.
+        IF TYPE("Articulo") = "U"
+            WriteLog("   ERROR ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Campo 'Articulo' no encontrado en COMBINA.DBF")
+            llValidStructure = .F.
+        ENDIF
+        IF TYPE("Cantidad") = "U"
+            WriteLog("   ERROR ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Campo 'Cantidad' no encontrado en COMBINA.DBF")
+            llValidStructure = .F.
+        ENDIF
+        IF TYPE("Color") = "U"
+            WriteLog("   ADVERTENCIA ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Campo 'Color' no encontrado en COMBINA.DBF")
+        ENDIF
+        IF TYPE("Talle") = "U"
+            WriteLog("   ADVERTENCIA ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Campo 'Talle' no encontrado en COMBINA.DBF")
+        ENDIF
+        
+        IF !llValidStructure
+            USE IN (lcCombinaAlias)
+            RETURN '[]'
+        ENDIF
+        
+        * Scan all combinations for this article looking for zero/negative stock
+        SCAN FOR ALLTRIM(UPPER(Articulo)) = ALLTRIM(UPPER(lcArticleCodigo))
+            TRY
+                * Get stock quantity - handle different data types
+                lnCantidad = 0
+                IF TYPE("Cantidad") = "N"
+                    lnCantidad = Cantidad
+                ELSE
+                    lnCantidad = VAL(TRANSFORM(Cantidad))
+                ENDIF
+                
+                * Only process records with zero or negative stock
+                IF lnCantidad <= 0
+                    * Get Color and Talle codes
+                    lcColorCode = ""
+                    lcTalleCode = ""
+                    
+                    IF TYPE("Color") != "U" AND !ISNULL(Color) AND !EMPTY(Color)
+                        lcColorCode = ALLTRIM(TRANSFORM(Color))
+                    ENDIF
+                    
+                    IF TYPE("Talle") != "U" AND !ISNULL(Talle) AND !EMPTY(Talle)
+                        lcTalleCode = ALLTRIM(TRANSFORM(Talle))
+                    ENDIF
+                    
+                    * Get descriptions using TABLAS lookups (fault-tolerant)
+                    lcColorDesc = ""
+                    lcTalleDesc = ""
+                    
+                    IF !EMPTY(lcColorCode)
+                        TRY
+                            lcColorDesc = LookupTablas(21, lcColorCode)  && Color table
+                        CATCH TO loColorError
+                            WriteLog("   ADVERTENCIA ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Error lookup Color " + lcColorCode + " - " + loColorError.Message)
+                            lcColorDesc = lcColorCode  && Fallback to code
+                        ENDTRY
+                    ENDIF
+                    
+                    IF !EMPTY(lcTalleCode)
+                        TRY
+                            lcTalleDesc = LookupTablas(20, lcTalleCode)  && Talle table
+                        CATCH TO loTalleError
+                            WriteLog("   ADVERTENCIA ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Error lookup Talle " + lcTalleCode + " - " + loTalleError.Message)
+                            lcTalleDesc = lcTalleCode  && Fallback to code
+                        ENDTRY
+                    ENDIF
+                    
+                    * Build exclusion JSON array only if we have at least one variant
+                    IF !EMPTY(lcColorDesc) OR !EMPTY(lcTalleDesc)
+                        * Each exclusion is an array of variant objects
+                        lcCurrentExclusion = "["
+                        
+                        * Add Color variant object if we have a color
+                        IF !EMPTY(lcColorDesc)
+                            lcCurrentExclusion = lcCurrentExclusion + '{"Variant":"Color","Value":"' + STRTRAN(lcColorDesc, '"', '\"') + '"}'
+                            IF !EMPTY(lcTalleDesc)
+                                lcCurrentExclusion = lcCurrentExclusion + ","
+                            ENDIF
+                        ENDIF
+                        
+                        * Add Talle variant object if we have a talle
+                        IF !EMPTY(lcTalleDesc)
+                            lcCurrentExclusion = lcCurrentExclusion + '{"Variant":"Talle","Value":"' + STRTRAN(lcTalleDesc, '"', '\"') + '"}'
+                        ENDIF
+                        
+                        lcCurrentExclusion = lcCurrentExclusion + "]"
+                        
+                        * Add to exclusions list
+                        IF !EMPTY(lcExclusions)
+                            lcExclusions = lcExclusions + ","
+                        ENDIF
+                        lcExclusions = lcExclusions + lcCurrentExclusion
+                        
+                        lnExclusionsFound = lnExclusionsFound + 1
+                        
+                        * * Debug log for first few exclusions
+                        * IF lnExclusionsFound <= 3
+                        *     WriteLog("   DEBUG ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Exclusion " + TRANSFORM(lnExclusionsFound) + " - Color: '" + lcColorDesc + "', Talle: '" + lcTalleDesc + "', Cantidad: " + TRANSFORM(lnCantidad))
+                        * ENDIF
+                    ENDIF
+                ENDIF
+                
+            CATCH TO loRecordError
+                WriteLog("   ERROR ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Error procesando registro - " + loRecordError.Message)
+                * Continue processing other records
+            ENDTRY
+        ENDSCAN
+        
+        * Close COMBINA.DBF
+        TRY
+            USE IN (lcCombinaAlias)
+        CATCH TO loCloseError
+            WriteLog("   ADVERTENCIA ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Error cerrando COMBINA.DBF - " + loCloseError.Message)
+        ENDTRY
+        
+    CATCH TO loError
+        WriteLog("   ERROR ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Error general - " + loError.Message)
+        WriteLog("   INFO: Continuando con exclusions vacías para este artículo")
+        
+        * Ensure cleanup on error
+        TRY
+            IF USED(lcCombinaAlias)
+                USE IN (lcCombinaAlias)
+            ENDIF
+        CATCH TO loCleanupError
+            WriteLog("   ERROR ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Error en limpieza - " + loCleanupError.Message)
+        ENDTRY
+        
+        * Return empty exclusions on major error (but don't fail the entire sync)
+        lcExclusions = ""
+    ENDTRY
+    
+    * Build final Exclusions JSON array
+    LOCAL lcResult
+    lcResult = "[" + lcExclusions + "]"
+    
+    * * Final logging
+    * IF lnExclusionsFound = 0
+    *     WriteLog("   INFO ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Sin exclusions - todos los combos tienen stock")
+    * ELSE
+    *     WriteLog("   INFO ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: " + TRANSFORM(lnExclusionsFound) + " variant combos sin stock encontrados")
+    * ENDIF
+    
+    RETURN lcResult
 ENDFUNC

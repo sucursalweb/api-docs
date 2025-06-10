@@ -53,6 +53,7 @@ Esta versión incluye mejoras significativas sobre la implementación original:
 - **📊 Configuración centralizada**: Variables globales en lugar de constantes para mayor flexibilidad
 - **🚀 Arquitectura simplificada**: Eliminación de código legacy y enfoque en SQL directo
 - **🎨 Sistema de variantes normalizado**: Extrae combinaciones desde COMBINA.DBF con lookups en TABLAS.DBF
+- **📦 Sistema de exclusiones de stock**: Identifica automáticamente combinaciones de variantes sin stock desde COMBINA.DBF
 
 ## Resumen para Desarrolladores VFP
 
@@ -80,6 +81,7 @@ Este proyecto demuestra cómo leer productos desde un archivo DBF y sincronizarl
 
 - Lee productos desde una ruta configurable de DBF (por defecto: `/samples/dbf-vfox/data/ARTICULO.DBF`).
 - Extrae variantes de productos desde COMBINA.DBF con lookups descriptivos en TABLAS.DBF.
+- Extrae exclusiones de stock (combinaciones sin inventario) desde COMBINA.DBF basado en el campo Cantidad.
 - Sincroniza con la API v2 de SucursalWeb, siguiendo los 4 pasos principales.
 - Procesa productos en lotes de 200 en el Paso #2.
 - Aplica cálculo de IVA (21% por defecto) sobre los precios.
@@ -90,7 +92,8 @@ Este proyecto demuestra cómo leer productos desde un archivo DBF y sincronizarl
 - **Almacenamiento optimizado** de productos basado en strings para mejor rendimiento.
 - **Sistema robusto de limpieza automática** de archivos DBF en caso de errores.
 - **Arquitectura de variantes normalizada** que maneja inconsistencias de datos graciosamente.
-- **Tolerancia a fallos** para continuar sincronización aunque falten datos de variantes.
+- **Sistema de exclusiones de stock** que identifica automáticamente combinaciones sin inventario.
+- **Tolerancia a fallos** para continuar sincronización aunque falten datos de variantes o exclusiones.
 
 ## Estructura del programa
 
@@ -110,6 +113,7 @@ El programa está organizado en un módulo principal con punto de entrada explí
 - `FUNCTION ExtractProductsFromRange`: Extrae lotes de productos de manera eficiente
 - `FUNCTION BuildProductsJsonFromList`: Construye JSON desde la lista de productos
 - `FUNCTION ExtractVariantsFromCombina`: Extrae variantes desde COMBINA.DBF con lookups en TABLAS.DBF
+- `FUNCTION ExtractExclusionsFromCombina`: Extrae exclusiones (combos sin stock) desde COMBINA.DBF
 - `FUNCTION LookupTablas`: Busca descripciones en TABLAS.DBF
 - `FUNCTION FindFieldByPattern`: Encuentra campos por patrón (ACTIVO/WEB)
 - `FUNCTION RecordMatchesCriteria`: Verifica si un registro cumple los criterios
@@ -135,9 +139,9 @@ En las aplicaciones VFP tradicionales, cuando trabajamos con grandes cantidades 
 
 Por estas razones, el procedimiento `UploadProductBatches` divide tu lista completa de productos en grupos más pequeños (por defecto, 200 productos por lote) y los envía secuencialmente. Es como enviar varias cajas pequeñas en lugar de un camión completo de mercadería.
 
-## Sistema de Variantes con COMBINA.DBF
+## Sistema de Variantes y Exclusiones con COMBINA.DBF
 
-El programa utiliza un sistema normalizado de variantes que extrae las combinaciones de Color y Talle desde un archivo independiente (COMBINA.DBF) en lugar de usar las columnas C1-C9 y T1-T9 del archivo ARTICULO.DBF.
+El programa utiliza un sistema normalizado de variantes que extrae las combinaciones de Color y Talle desde un archivo independiente (COMBINA.DBF) en lugar de usar las columnas C1-C9 y T1-T9 del archivo ARTICULO.DBF. Además, utiliza el campo Cantidad para identificar automáticamente exclusiones de stock.
 
 ### ¿Por qué usar COMBINA.DBF?
 
@@ -162,28 +166,39 @@ COMBINA.DBF contiene:
 1. **Combinaciones ilimitadas**: No hay límite de 9x9 variantes por artículo
 2. **Mejor organización**: Cada combinación es un registro independiente
 3. **Stock granular**: Cada combinación puede tener su propio stock
-4. **Lookups formalizados**: Descripiones centralizadas en TABLAS.DBF
-5. **Preparado para futuras funcionalidades**: Base sólida para exclusiones por stock
+4. **Exclusiones automáticas**: Identifica combinaciones sin stock (Cantidad <= 0)
+5. **Lookups formalizados**: Descripiones centralizadas en TABLAS.DBF
+6. **Preparado para futuras funcionalidades**: Base sólida para gestión avanzada de inventario
 
 ### Cómo funciona:
 
-1. **Extracción**: Para cada artículo, se buscan todas sus combinaciones en COMBINA.DBF
-2. **Deduplicación**: Se eliminan colores y talles duplicados automáticamente
-3. **Lookups**: Se obtienen las descripciones desde TABLAS.DBF:
+1. **Extracción de variantes**: Para cada artículo, se buscan todas sus combinaciones en COMBINA.DBF
+2. **Extracción de exclusiones**: Se identifican combinaciones con Cantidad <= 0 (sin stock)
+3. **Deduplicación**: Se eliminan colores y talles duplicados automáticamente
+4. **Lookups**: Se obtienen las descripciones desde TABLAS.DBF:
    - Colores: tabla 21 
    - Talles: tabla 20
-4. **Fallback**: Si no se encuentra descripción, se usa el código original
-5. **Tolerancia a fallos**: Si falta COMBINA.DBF o hay datos inconsistentes, se usan variantes vacías
+5. **Fallback**: Si no se encuentra descripción, se usa el código original
+6. **Tolerancia a fallos**: Si falta COMBINA.DBF o hay datos inconsistentes, se usan variantes/exclusiones vacías
 
 ### Manejo de inconsistencias:
 
 El sistema está diseñado para ser tolerante a problemas comunes:
-- **Archivo faltante**: Si COMBINA.DBF no existe, continúa con variantes vacías
-- **Artículos faltantes**: Si un artículo de ARTICULO.DBF no está en COMBINA.DBF, usa variantes vacías
+- **Archivo faltante**: Si COMBINA.DBF no existe, continúa con variantes/exclusiones vacías
+- **Artículos faltantes**: Si un artículo de ARTICULO.DBF no está en COMBINA.DBF, usa variantes/exclusiones vacías
 - **Datos corruptos**: Ignora registros inválidos y continúa con los válidos
 - **Lookups fallidos**: Usa códigos originales si fallan las descripciones de TABLAS.DBF
+- **Datos de stock inválidos**: Trata valores no numéricos de Cantidad como 0 (sin stock)
 
 El programa registra todos estos casos en el log para facilitar la corrección de datos sin detener la sincronización.
+
+### Beneficios del sistema de exclusiones:
+
+- **Experiencia de usuario mejorada**: Los clientes no pueden seleccionar combinaciones que no están disponibles
+- **Gestión de inventario en tiempo real**: La API refleja el estado actual del stock en cada sincronización
+- **Reducción de pedidos fallidos**: Previene intentos de compra de productos sin stock
+- **Información precisa**: Distingue entre "sin stock temporalmente" vs "combinación inexistente"
+- **Compatibilidad total**: Funciona con el sistema de variantes existente sin conflictos
 
 ## Sistema de Deduplicación SQL
 
@@ -366,7 +381,18 @@ Los productos se envían a la API en formato JSON con la siguiente estructura:
   "Pics": ["ag0108"],                    // Campo IMAGEN
   "Attachs": [],                          // Array vacío para adjuntos
   "Props": [],
-  "Exclusions": []
+  "Exclusions": [                        // Combinaciones sin stock desde COMBINA.DBF (Cantidad <= 0)
+    [
+      {
+        "Variant": "Color",
+        "Value": "Negro"
+      },
+      {
+        "Variant": "Talle", 
+        "Value": "M"
+      }
+    ]
+  ]
 }
 ```
 
@@ -455,6 +481,11 @@ La función procesa los campos de la estructura estándar de ARTICULO.DBF incluy
   - Talles: Extraídos desde COMBINA.DBF con descripción de TABLAS.DBF (tabla 20)
   - Se incluyen todas las combinaciones encontradas por artículo
   - Manejo tolerante a fallos para datos inconsistentes o faltantes
+- **Exclusiones de stock**:
+  - Combinaciones de variantes sin inventario (Cantidad <= 0 en COMBINA.DBF)
+  - Formato: Array de arrays de objetos variant con Variant/Value
+  - Permite identificar qué combinaciones específicas están agotadas
+  - Se incluyen solo las combinaciones sin stock, no todas las posibles
 - **Campos de clasificación** (todos van dentro del array `Tags`):
   - Marca/Brand (TABLAS.DBF con TABLA=14)
   - Rubros/Category (TABLAS.DBF con TABLA=13, campo RUBRO)
@@ -476,3 +507,5 @@ La función procesa los campos de la estructura estándar de ARTICULO.DBF incluy
 - Prueba el flujo completo con un conjunto pequeño de productos antes de sincronizar todo tu catálogo.
 - Mantén habilitado el sistema de logs durante las pruebas iniciales para facilitar el diagnóstico.
 - El programa incluye verificación automática de archivos DBF al inicio, pero si experimentas problemas, usa `EmergencyDbfCleanup()` desde la ventana de comandos.
+- Asegúrate de que el campo Cantidad en COMBINA.DBF contenga valores numéricos precisos para un correcto funcionamiento del sistema de exclusiones.
+- Las exclusiones se calculan en tiempo real durante cada sincronización, reflejando el estado actual del inventario.
