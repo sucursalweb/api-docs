@@ -31,7 +31,7 @@ DO Main
 * Punto de entrada principal del programa
 PROCEDURE Main
     * Initialize configuration variables first
-    PUBLIC gcArticuloPath, gcTablasPath, gcApiBase, gnBatchSize, gnIvaRate
+    PUBLIC gcArticuloPath, gcTablasPath, gcCombinaPath, gcApiBase, gnBatchSize, gnIvaRate
     PUBLIC gcTenant, gcApiKey, gcLogFile
     
     * Initialize product data storage
@@ -41,6 +41,7 @@ PROCEDURE Main
     * Data paths and constants 
     gcArticuloPath = "/samples/dbf-vfox/data/ARTICULO.DBF"  && Path to DBF with products
     gcTablasPath = "/samples/dbf-vfox/data/TABLAS.DBF"      && Path to lookup tables DBF
+    gcCombinaPath = "/samples/dbf-vfox/data/COMBINA.DBF"    && Path to combinations DBF
     gcApiBase = "https://api.sucursalweb.io/v2"             && API base URL
     gnBatchSize = 200                                       && Default batch size for uploads
     gnIvaRate = 1.21                                        && Multiplicador de IVA (21%)
@@ -89,8 +90,11 @@ PROCEDURE Main
     CLEAR
     WriteLog("=== Sincronización de Productos con SucursalWeb API v2 ===")
     WriteLog("DBF Origen: " + gcArticuloPath)  && Using global variable
+    WriteLog("DBF Tablas: " + gcTablasPath)    && Show tables path
+    WriteLog("DBF Combina: " + gcCombinaPath)  && Show combinations path
     WriteLog("Tamaño de lote: " + TRANSFORM(gnBatchSize))  && Using global variable
     WriteLog("Estrategia de deduplicación: SQL direct")
+    WriteLog("Variantes: Extraídas desde COMBINA.DBF con lookups en TABLAS.DBF")
     
     * Verifica conexión a Internet antes de empezar
     IF .NOT. CheckInternetConnection()
@@ -1037,13 +1041,14 @@ PROCEDURE ForceCloseAllDbfs()
         ENDFOR
         
         * Second pass: Close by known aliases (in case some remain)
-        LOCAL ARRAY laKnownAliases[6]
+        LOCAL ARRAY laKnownAliases[7]
         laKnownAliases[1] = "Articulos"
         laKnownAliases[2] = "ArtTemp"
         laKnownAliases[3] = "Tablas"
         laKnownAliases[4] = "TabTemp" 
         laKnownAliases[5] = "TablasLookup"
         laKnownAliases[6] = "TablasTemp"
+        laKnownAliases[7] = "CombinaTemp"
         
         FOR i = 1 TO ALEN(laKnownAliases)
             TRY
@@ -1392,45 +1397,8 @@ FUNCTION BuildProductsJsonFromList(lcProductList)
                         * WriteLog("   - Producto encontrado en DBF: " + lcProduct)
                         * Build complete JSON with all fields
                         
-                        * Extract Variants (Colors C1-C9)
-                        lcColors = ""
-                        LOCAL lnColorIdx
-                        FOR lnColorIdx = 1 TO 9
-                            lcField = "C" + TRANSFORM(lnColorIdx)
-                            IF TYPE("ArtTemp." + lcField) != "U" AND !ISNULL(EVALUATE("ArtTemp." + lcField)) AND !EMPTY(EVALUATE("ArtTemp." + lcField))
-                                * Convert to string safely regardless of data type
-                                lcValue = ALLTRIM(TRANSFORM(EVALUATE("ArtTemp." + lcField)))
-                                IF !EMPTY(lcValue) AND lcValue != "0" AND lcValue != ".F." AND lcValue != ".T."
-                                    IF !EMPTY(lcColors)
-                                        lcColors = lcColors + ","
-                                    ENDIF
-                                    lcColors = lcColors + '"' + STRTRAN(lcValue, '"', '\"') + '"'
-                                ENDIF
-                            ENDIF
-                        ENDFOR
-                        
-                        * Extract Variants (Talles T1-T9)
-                        lcTalles = ""
-                        LOCAL lnTalleIdx
-                        FOR lnTalleIdx = 1 TO 9
-                            lcField = "T" + TRANSFORM(lnTalleIdx)
-                            IF TYPE("ArtTemp." + lcField) != "U" AND !ISNULL(EVALUATE("ArtTemp." + lcField)) AND !EMPTY(EVALUATE("ArtTemp." + lcField))
-                                * Convert to string safely regardless of data type
-                                lcValue = ALLTRIM(TRANSFORM(EVALUATE("ArtTemp." + lcField)))
-                                IF !EMPTY(lcValue) AND lcValue != "0" AND lcValue != ".F." AND lcValue != ".T."
-                                    IF !EMPTY(lcTalles)
-                                        lcTalles = lcTalles + ","
-                                    ENDIF
-                                    lcTalles = lcTalles + '"' + STRTRAN(lcValue, '"', '\"') + '"'
-                                ENDIF
-                            ENDIF
-                        ENDFOR
-                        
-                        * Build Variants JSON
-                        lcVariants = '['
-                        lcVariants = lcVariants + '{"Variant":"Color","OrderedList":[' + lcColors + ']},'
-                        lcVariants = lcVariants + '{"Variant":"Talle","OrderedList":[' + lcTalles + ']}'
-                        lcVariants = lcVariants + ']'
+                        * Extract Variants from COMBINA.DBF (replaces old C1-C9, T1-T9 logic)
+                        lcVariants = ExtractVariantsFromCombina(lcProduct)
                         
                         * Get Brand from MARCA field (lookup in table 14)
                         lcBrand = "null"
@@ -1683,4 +1651,273 @@ FUNCTION VerifyNoDuplicates()
         WriteLog("OK: Verificación completada - no se encontraron duplicados en la lista final")
         RETURN .T.
     ENDIF
+ENDFUNC
+
+* ================================================================================
+* ExtractVariantsFromCombina - Extract variants from COMBINA.DBF for a specific article
+* Uses TABLAS.DBF lookups for Color (table 21) and Talle (table 20) descriptions
+* String-based approach - no arrays to avoid VFP syntax issues
+* FAULT-TOLERANT: Handles missing articles, corrupt data, and inconsistencies gracefully
+* ================================================================================
+FUNCTION ExtractVariantsFromCombina(lcArticleCodigo)
+    LOCAL lcColors, lcTalles, lcCombinaAlias
+    LOCAL lcColorCode, lcTalleCode, lcColorDesc, lcTalleDesc, lcValue
+    LOCAL lcColorList, lcTalleList  && String lists to track unique values
+    LOCAL lcVariants, lnCombinationsFound, llDataConsistencyOK
+    
+    lcColors = ""
+    lcTalles = ""
+    lcColorList = ""  && Comma-separated list of unique color codes
+    lcTalleList = ""  && Comma-separated list of unique talle codes
+    lcCombinaAlias = "CombinaTemp"
+    lnCombinationsFound = 0
+    llDataConsistencyOK = .T.
+    
+    IF EMPTY(lcArticleCodigo)
+        WriteLog("   ADVERTENCIA ExtractVariantsFromCombina: Código de artículo vacío - usando variants vacíos")
+        RETURN '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]'
+    ENDIF
+    
+    TRY
+        * Check if COMBINA.DBF exists
+        IF !FILE(gcCombinaPath)
+            WriteLog("   INFO ExtractVariantsFromCombina[" + lcArticleCodigo + "]: COMBINA.DBF no encontrado - usando variants vacíos")
+            RETURN '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]'
+        ENDIF
+        
+        * Open COMBINA.DBF with error handling
+        IF USED(lcCombinaAlias)
+            USE IN (lcCombinaAlias)
+        ENDIF
+        
+        TRY
+            USE (gcCombinaPath) IN 0 SHARED ALIAS (lcCombinaAlias)
+        CATCH TO loDbfError
+            WriteLog("   ERROR ExtractVariantsFromCombina[" + lcArticleCodigo + "]: No se pudo abrir COMBINA.DBF - " + loDbfError.Message)
+            WriteLog("   INFO: Continuando con variants vacíos para este artículo")
+            RETURN '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]'
+        ENDTRY
+        
+        SELECT (lcCombinaAlias)
+        
+        * Verify DBF structure has required fields
+        LOCAL llValidStructure
+        llValidStructure = .T.
+        IF TYPE("Articulo") = "U"
+            WriteLog("   ERROR ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Campo 'Articulo' no encontrado en COMBINA.DBF")
+            llValidStructure = .F.
+        ENDIF
+        IF TYPE("Color") = "U"
+            WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Campo 'Color' no encontrado en COMBINA.DBF")
+        ENDIF
+        IF TYPE("Talle") = "U"
+            WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Campo 'Talle' no encontrado en COMBINA.DBF")
+        ENDIF
+        
+        IF !llValidStructure
+            USE IN (lcCombinaAlias)
+            WriteLog("   INFO: Continuando con variants vacíos para este artículo debido a estructura inválida")
+            RETURN '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]'
+        ENDIF
+        
+        * Scan all combinations for this article with fault tolerance
+        SCAN FOR ALLTRIM(UPPER(Articulo)) = ALLTRIM(UPPER(lcArticleCodigo))
+            lnCombinationsFound = lnCombinationsFound + 1
+            
+            TRY
+                * Process Color with fault tolerance
+                IF TYPE("Color") != "U" AND !ISNULL(Color) AND !EMPTY(Color)
+                    TRY
+                        lcColorCode = ALLTRIM(TRANSFORM(Color))
+                        
+                        * Validate color code (basic sanity check)
+                        IF !EMPTY(lcColorCode) AND LEN(lcColorCode) <= 50  && Reasonable length limit
+                            * Check if this color is already in our string list (avoid duplicates)
+                            IF EMPTY(lcColorList) OR ("," + lcColorCode + ",") $ ("," + lcColorList + ",") = .F.
+                                IF !EMPTY(lcColorList)
+                                    lcColorList = lcColorList + ","
+                                ENDIF
+                                lcColorList = lcColorList + lcColorCode
+                            ENDIF
+                        ELSE
+                            WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Color inválido ignorado: '" + TRANSFORM(Color) + "'")
+                        ENDIF
+                    CATCH TO loColorError
+                        WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error procesando Color - " + loColorError.Message)
+                        llDataConsistencyOK = .F.
+                    ENDTRY
+                ENDIF
+                
+                * Process Talle with fault tolerance
+                IF TYPE("Talle") != "U" AND !ISNULL(Talle) AND !EMPTY(Talle)
+                    TRY
+                        lcTalleCode = ALLTRIM(TRANSFORM(Talle))
+                        
+                        * Validate talle code (basic sanity check)
+                        IF !EMPTY(lcTalleCode) AND LEN(lcTalleCode) <= 50  && Reasonable length limit
+                            * Check if this talle is already in our string list (avoid duplicates)
+                            IF EMPTY(lcTalleList) OR ("," + lcTalleCode + ",") $ ("," + lcTalleList + ",") = .F.
+                                IF !EMPTY(lcTalleList)
+                                    lcTalleList = lcTalleList + ","
+                                ENDIF
+                                lcTalleList = lcTalleList + lcTalleCode
+                            ENDIF
+                        ELSE
+                            WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Talle inválido ignorado: '" + TRANSFORM(Talle) + "'")
+                        ENDIF
+                    CATCH TO loTalleError
+                        WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error procesando Talle - " + loTalleError.Message)
+                        llDataConsistencyOK = .F.
+                    ENDTRY
+                ENDIF
+                
+            CATCH TO loCombinationError
+                WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error en combinación RECNO=" + TRANSFORM(RECNO()) + " - " + loCombinationError.Message)
+                llDataConsistencyOK = .F.
+                * Continue with next record instead of failing completely
+            ENDTRY
+        ENDSCAN
+        
+        * Log diagnostic information
+        IF lnCombinationsFound = 0
+            WriteLog("   INFO ExtractVariantsFromCombina[" + lcArticleCodigo + "]: No se encontraron combinaciones en COMBINA.DBF")
+        ELSE
+            * WriteLog("   INFO ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Procesadas " + TRANSFORM(lnCombinationsFound) + " combinaciones")
+            IF !llDataConsistencyOK
+                WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Se detectaron inconsistencias de datos")
+            ENDIF
+        ENDIF
+        
+        * Build Colors JSON using TABLAS lookup (table 21) with fault tolerance
+        IF !EMPTY(lcColorList)
+            TRY
+                * Simple approach: replace commas with line breaks and use ALINES
+                LOCAL laColorCodes[1], lnColorItems, lnColorIdx
+                lnColorItems = ALINES(laColorCodes, STRTRAN(lcColorList, ",", CHR(13)))
+                
+                FOR lnColorIdx = 1 TO lnColorItems
+                    TRY
+                        lcCurrentColor = ALLTRIM(laColorCodes[lnColorIdx])
+                        IF !EMPTY(lcCurrentColor)
+                            * Try TABLAS lookup with error handling
+                            TRY
+                                lcColorDesc = LookupTablas(21, lcCurrentColor)
+                            CATCH TO loLookupError
+                                WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error en lookup Color '" + lcCurrentColor + "' - " + loLookupError.Message)
+                                lcColorDesc = ""  && Use empty description on lookup error
+                            ENDTRY
+                            
+                            lcValue = IIF(!EMPTY(lcColorDesc), lcColorDesc, lcCurrentColor)
+                            
+                            * Validate final value before adding to JSON
+                            IF !EMPTY(lcValue) AND LEN(lcValue) <= 200  && Reasonable limit for JSON
+                                IF !EMPTY(lcColors)
+                                    lcColors = lcColors + ","
+                                ENDIF
+                                lcColors = lcColors + '"' + STRTRAN(lcValue, '"', '\"') + '"'
+                            ELSE
+                                WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Color final inválido ignorado: '" + lcValue + "'")
+                            ENDIF
+                        ENDIF
+                    CATCH TO loColorProcessingError
+                        WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error procesando color #" + TRANSFORM(lnColorIdx) + " - " + loColorProcessingError.Message)
+                        * Continue with next color instead of failing completely
+                    ENDTRY
+                ENDFOR
+            CATCH TO loColorBuildError
+                WriteLog("   ERROR ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error construyendo lista de colores - " + loColorBuildError.Message)
+                lcColors = ""  && Reset to empty on error
+            ENDTRY
+        ENDIF
+        
+        * Build Talles JSON using TABLAS lookup (table 20) with fault tolerance  
+        IF !EMPTY(lcTalleList)
+            TRY
+                * Simple approach: replace commas with line breaks and use ALINES
+                LOCAL laTalleCodes[1], lnTalleItems, lnTalleIdx
+                lnTalleItems = ALINES(laTalleCodes, STRTRAN(lcTalleList, ",", CHR(13)))
+                
+                FOR lnTalleIdx = 1 TO lnTalleItems
+                    TRY
+                        lcCurrentTalle = ALLTRIM(laTalleCodes[lnTalleIdx])
+                        IF !EMPTY(lcCurrentTalle)
+                            * Try TABLAS lookup with error handling
+                            TRY
+                                lcTalleDesc = LookupTablas(20, lcCurrentTalle)
+                            CATCH TO loLookupError
+                                WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error en lookup Talle '" + lcCurrentTalle + "' - " + loLookupError.Message)
+                                lcTalleDesc = ""  && Use empty description on lookup error
+                            ENDTRY
+                            
+                            lcValue = IIF(!EMPTY(lcTalleDesc), lcTalleDesc, lcCurrentTalle)
+                            
+                            * Validate final value before adding to JSON
+                            IF !EMPTY(lcValue) AND LEN(lcValue) <= 200  && Reasonable limit for JSON
+                                IF !EMPTY(lcTalles)
+                                    lcTalles = lcTalles + ","
+                                ENDIF
+                                lcTalles = lcTalles + '"' + STRTRAN(lcValue, '"', '\"') + '"'
+                            ELSE
+                                WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Talle final inválido ignorado: '" + lcValue + "'")
+                            ENDIF
+                        ENDIF
+                    CATCH TO loTalleProcessingError
+                        WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error procesando talle #" + TRANSFORM(lnTalleIdx) + " - " + loTalleProcessingError.Message)
+                        * Continue with next talle instead of failing completely
+                    ENDTRY
+                ENDFOR
+            CATCH TO loTalleBuildError
+                WriteLog("   ERROR ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error construyendo lista de talles - " + loTalleBuildError.Message)
+                lcTalles = ""  && Reset to empty on error
+            ENDTRY
+        ENDIF
+        
+        * Close COMBINA.DBF
+        TRY
+            USE IN (lcCombinaAlias)
+        CATCH TO loCloseError
+            WriteLog("   ADVERTENCIA ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error cerrando COMBINA.DBF - " + loCloseError.Message)
+        ENDTRY
+        
+    CATCH TO loError
+        WriteLog("   ERROR ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error general - " + loError.Message)
+        WriteLog("   INFO: Continuando con variants vacíos para este artículo")
+        
+        * Ensure cleanup on error
+        TRY
+            IF USED(lcCombinaAlias)
+                USE IN (lcCombinaAlias)
+            ENDIF
+        CATCH TO loCleanupError
+            WriteLog("   ERROR ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error en limpieza - " + loCleanupError.Message)
+        ENDTRY
+        
+        * Return empty variants on major error (but don't fail the entire sync)
+        lcColors = ""
+        lcTalles = ""
+    ENDTRY
+    
+    * Build final Variants JSON structure (always succeeds)
+    TRY
+        lcVariants = '['
+        lcVariants = lcVariants + '{"Variant":"Color","OrderedList":[' + lcColors + ']},'
+        lcVariants = lcVariants + '{"Variant":"Talle","OrderedList":[' + lcTalles + ']}'
+        lcVariants = lcVariants + ']'
+    CATCH TO loJsonError
+        WriteLog("   ERROR ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Error construyendo JSON final - " + loJsonError.Message)
+        * Fallback to absolutely minimal structure
+        lcVariants = '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]'
+    ENDTRY
+    
+    * Final logging
+    IF EMPTY(lcColors) AND EMPTY(lcTalles)
+        WriteLog("   INFO ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Resultado final - variants vacíos")
+    ELSE
+        * LOCAL lnColorCount, lnTalleCount
+        * lnColorCount = IIF(EMPTY(lcColors), 0, OCCURS(",", lcColors) + 1)
+        * lnTalleCount = IIF(EMPTY(lcTalles), 0, OCCURS(",", lcTalles) + 1)
+        * WriteLog("   INFO ExtractVariantsFromCombina[" + lcArticleCodigo + "]: Resultado final - " + TRANSFORM(lnColorCount) + " colores, " + TRANSFORM(lnTalleCount) + " talles")
+    ENDIF
+    
+    RETURN lcVariants
 ENDFUNC

@@ -25,6 +25,7 @@
    * Ajusta estas rutas según la ubicación de tus archivos DBF:
    gcArticuloPath = "/samples/dbf-vfox/data/ARTICULO.DBF"  && Ruta a tu DBF de productos
    gcTablasPath = "/samples/dbf-vfox/data/TABLAS.DBF"      && Ruta a tu DBF de tablas
+   gcCombinaPath = "/samples/dbf-vfox/data/COMBINA.DBF"    && Ruta a tu DBF de combinaciones
    ```
 
 ### Configuración opcional:
@@ -51,6 +52,7 @@ Esta versión incluye mejoras significativas sobre la implementación original:
 - **🔧 Limpieza automática**: Sistema robusto de limpieza de archivos DBF en caso de errores
 - **📊 Configuración centralizada**: Variables globales en lugar de constantes para mayor flexibilidad
 - **🚀 Arquitectura simplificada**: Eliminación de código legacy y enfoque en SQL directo
+- **🎨 Sistema de variantes normalizado**: Extrae combinaciones desde COMBINA.DBF con lookups en TABLAS.DBF
 
 ## Resumen para Desarrolladores VFP
 
@@ -77,16 +79,18 @@ Todo está diseñado para funcionar directamente sin necesidad de instalar nada 
 Este proyecto demuestra cómo leer productos desde un archivo DBF y sincronizarlos con la API v2 de SucursalWeb usando Visual FoxPro 9. Las operaciones HTTP se realizan mediante el objeto COM `WinHttp.WinHttpRequest.5.1`.
 
 - Lee productos desde una ruta configurable de DBF (por defecto: `/samples/dbf-vfox/data/ARTICULO.DBF`).
+- Extrae variantes de productos desde COMBINA.DBF con lookups descriptivos en TABLAS.DBF.
 - Sincroniza con la API v2 de SucursalWeb, siguiendo los 4 pasos principales.
 - Procesa productos en lotes de 200 en el Paso #2.
 - Aplica cálculo de IVA (21% por defecto) sobre los precios.
 - Utiliza `WinHttp.WinHttpRequest.5.1` para las solicitudes HTTP.
 - Implementa manejo de errores y registro de logs para mejor seguimiento.
-- **NUEVO**: Sistema de deduplicación SQL directo con 3 estrategias configurables (FIRST, LAST, HIGHEST_PRICE).
-- **NUEVO**: Herramientas de debugging integradas para manejo de archivos DBF.
-- **NUEVO**: Almacenamiento optimizado de productos basado en strings para mejor rendimiento.
-- **NUEVO**: Sistema robusto de limpieza automática de archivos DBF en caso de errores.
-- **NUEVO**: Arquitectura simplificada sin código legacy de deduplicación en memoria.
+- **Sistema de deduplicación SQL directo** con 3 estrategias configurables (FIRST, LAST, HIGHEST_PRICE).
+- **Herramientas de debugging integradas** para manejo de archivos DBF.
+- **Almacenamiento optimizado** de productos basado en strings para mejor rendimiento.
+- **Sistema robusto de limpieza automática** de archivos DBF en caso de errores.
+- **Arquitectura de variantes normalizada** que maneja inconsistencias de datos graciosamente.
+- **Tolerancia a fallos** para continuar sincronización aunque falten datos de variantes.
 
 ## Estructura del programa
 
@@ -105,6 +109,7 @@ El programa está organizado en un módulo principal con punto de entrada explí
 - `FUNCTION CheckInternetConnection`: Verifica conectividad antes de iniciar
 - `FUNCTION ExtractProductsFromRange`: Extrae lotes de productos de manera eficiente
 - `FUNCTION BuildProductsJsonFromList`: Construye JSON desde la lista de productos
+- `FUNCTION ExtractVariantsFromCombina`: Extrae variantes desde COMBINA.DBF con lookups en TABLAS.DBF
 - `FUNCTION LookupTablas`: Busca descripciones en TABLAS.DBF
 - `FUNCTION FindFieldByPattern`: Encuentra campos por patrón (ACTIVO/WEB)
 - `FUNCTION RecordMatchesCriteria`: Verifica si un registro cumple los criterios
@@ -129,6 +134,56 @@ En las aplicaciones VFP tradicionales, cuando trabajamos con grandes cantidades 
 4. **Control del progreso**: Los lotes te permiten mostrar al usuario un progreso real (ej: "Lote 5 de 25 completado").
 
 Por estas razones, el procedimiento `UploadProductBatches` divide tu lista completa de productos en grupos más pequeños (por defecto, 200 productos por lote) y los envía secuencialmente. Es como enviar varias cajas pequeñas en lugar de un camión completo de mercadería.
+
+## Sistema de Variantes con COMBINA.DBF
+
+El programa utiliza un sistema normalizado de variantes que extrae las combinaciones de Color y Talle desde un archivo independiente (COMBINA.DBF) en lugar de usar las columnas C1-C9 y T1-T9 del archivo ARTICULO.DBF.
+
+### ¿Por qué usar COMBINA.DBF?
+
+El enfoque tradicional de almacenar variantes en columnas fijas (C1-C9, T1-T9) tiene limitaciones:
+- **Límite de variantes**: Solo permite 9 colores y 9 talles por artículo
+- **Desperdicio de espacio**: Muchas columnas quedan vacías si el producto tiene pocas variantes
+- **Dificultad para manejo de stock**: No hay manera de asociar stock específico a cada combinación
+- **Datos desnormalizados**: La misma información se repite en múltiples lugares
+
+### Estructura de COMBINA.DBF
+
+```
+COMBINA.DBF contiene:
+- Articulo (FK): Código del artículo (relaciona con ARTICULO.DBF)
+- Color (FK): Código del color (relaciona con TABLAS.DBF, tabla 21)  
+- Talle (FK): Código del talle (relaciona con TABLAS.DBF, tabla 20)
+- Cantidad: Stock disponible para esta combinación específica
+```
+
+### Ventajas del sistema normalizado:
+
+1. **Combinaciones ilimitadas**: No hay límite de 9x9 variantes por artículo
+2. **Mejor organización**: Cada combinación es un registro independiente
+3. **Stock granular**: Cada combinación puede tener su propio stock
+4. **Lookups formalizados**: Descripiones centralizadas en TABLAS.DBF
+5. **Preparado para futuras funcionalidades**: Base sólida para exclusiones por stock
+
+### Cómo funciona:
+
+1. **Extracción**: Para cada artículo, se buscan todas sus combinaciones en COMBINA.DBF
+2. **Deduplicación**: Se eliminan colores y talles duplicados automáticamente
+3. **Lookups**: Se obtienen las descripciones desde TABLAS.DBF:
+   - Colores: tabla 21 
+   - Talles: tabla 20
+4. **Fallback**: Si no se encuentra descripción, se usa el código original
+5. **Tolerancia a fallos**: Si falta COMBINA.DBF o hay datos inconsistentes, se usan variantes vacías
+
+### Manejo de inconsistencias:
+
+El sistema está diseñado para ser tolerante a problemas comunes:
+- **Archivo faltante**: Si COMBINA.DBF no existe, continúa con variantes vacías
+- **Artículos faltantes**: Si un artículo de ARTICULO.DBF no está en COMBINA.DBF, usa variantes vacías
+- **Datos corruptos**: Ignora registros inválidos y continúa con los válidos
+- **Lookups fallidos**: Usa códigos originales si fallan las descripciones de TABLAS.DBF
+
+El programa registra todos estos casos en el log para facilitar la corrección de datos sin detener la sincronización.
 
 ## Sistema de Deduplicación SQL
 
@@ -291,11 +346,11 @@ Los productos se envían a la API en formato JSON con la siguiente estructura:
   "Variants": [
     {
       "Variant": "Color",
-      "OrderedList": ["bco", "nat", "negro", ...]  // C1-C9
+      "OrderedList": ["Blanco", "Natural", "Negro", ...]  // Desde COMBINA.DBF + TABLAS.DBF (tabla 21)
     },
     {
       "Variant": "Talle",
-      "OrderedList": ["95", "100", "105", ...]     // T1-T9
+      "OrderedList": ["95", "100", "105", ...]           // Desde COMBINA.DBF + TABLAS.DBF (tabla 20)
     }
   ],
   "Brand": "MARCA",                  // Marca de TABLAS.DBF (TABLA=14)
@@ -396,8 +451,10 @@ La función procesa los campos de la estructura estándar de ARTICULO.DBF incluy
 - **Campos básicos**: CODIGO, DESCRIP, DETALLE
 - **Precios**: PRECIO1 con IVA aplicado automáticamente
 - **Variantes**:
-  - Colores (C1-C9) como array en `Variants` con `Variant: "Color"`
-  - Talles (T1-T9) como array en `Variants` con `Variant: "Talle"`
+  - Colores: Extraídos desde COMBINA.DBF con descripción de TABLAS.DBF (tabla 21)
+  - Talles: Extraídos desde COMBINA.DBF con descripción de TABLAS.DBF (tabla 20)
+  - Se incluyen todas las combinaciones encontradas por artículo
+  - Manejo tolerante a fallos para datos inconsistentes o faltantes
 - **Campos de clasificación** (todos van dentro del array `Tags`):
   - Marca/Brand (TABLAS.DBF con TABLA=14)
   - Rubros/Category (TABLAS.DBF con TABLA=13, campo RUBRO)
