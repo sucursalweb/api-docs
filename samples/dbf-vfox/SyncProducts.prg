@@ -37,7 +37,7 @@ DO Main
 PROCEDURE Main
     * Initialize configuration variables first
     PUBLIC gcArticuloPath, gcTablasPath, gcCombinaPath, gcApiBase, gnBatchSize, gnIvaRate
-    PUBLIC gcTenant, gcApiKey, gcLogFile
+    PUBLIC gcTenant, gcApiKey, gcLogFile, gnLogLevel
     
     * Initialize product data storage
     gcProductList = ""
@@ -55,6 +55,10 @@ PROCEDURE Main
     gcTenant = "mi-tenant-id"                               && Reemplaza con tu Tenant real
     gcApiKey = "mi-api-key-secreto"                         && Reemplaza con tu Api-Key secreto
     gcLogFile = "/samples/dbf-vfox/synclog.txt"             && Archivo de log
+    
+    * OPTIMIZATION: Logging levels to reduce verbose output
+    * 0 = ERROR only, 1 = INFO + ERROR, 2 = DEBUG + INFO + ERROR
+    gnLogLevel = 1  && Set to 0 for production, 2 for debugging
     
     LOCAL llLogEnabled
     LOCAL llContinue  && Flag for early return conditions
@@ -87,9 +91,9 @@ PROCEDURE Main
     * === End startup cleanup ===
     
     * Debug: Verificar estado inicial de los datos de productos
-    WriteLog("INICIO: Verificando almacenamiento de productos después de InitLog")
-    WriteLog("INICIO: gcProductList inicializado: '" + gcProductList + "'")
-    WriteLog("INICIO: gnProductCount: " + TRANSFORM(gnProductCount))
+    WriteDebug("INICIO: Verificando almacenamiento de productos después de InitLog")
+    WriteDebug("INICIO: gcProductList inicializado: '" + gcProductList + "'")
+    WriteDebug("INICIO: gnProductCount: " + TRANSFORM(gnProductCount))
     
     * Mostrar información inicial
     CLEAR
@@ -144,9 +148,9 @@ PROCEDURE Main
             ENDIF
             
             * Debug: Verificar estado después de PrepareProducts
-            WriteLog("Main: POST-PrepareProducts - Conteo: " + TRANSFORM(lnCount))
-            WriteLog("Main: gcProductList length: " + TRANSFORM(LEN(gcProductList)))
-            WriteLog("Main: gnProductCount: " + TRANSFORM(gnProductCount))
+            WriteDebug("Main: POST-PrepareProducts - Conteo: " + TRANSFORM(lnCount))
+            WriteDebug("Main: gcProductList length: " + TRANSFORM(LEN(gcProductList)))
+            WriteDebug("Main: gnProductCount: " + TRANSFORM(gnProductCount))
             
             * Validar que tenemos productos para procesar
             IF lnCount <= 0 OR EMPTY(gcProductList)
@@ -183,8 +187,8 @@ PROCEDURE Main
                 IF llContinue  && Only show error if we haven't already flagged an issue
                     ShowError("Los productos no están disponibles para la sincronización.")
                     WriteLog("ERROR: Productos no disponibles para sincronización")
-                    WriteLog("DEBUG: gnProductCount: " + TRANSFORM(gnProductCount))
-                    WriteLog("DEBUG: gcProductList length: " + TRANSFORM(LEN(gcProductList)))
+                    WriteDebug("gnProductCount: " + TRANSFORM(gnProductCount))
+                    WriteDebug("gcProductList length: " + TRANSFORM(LEN(gcProductList)))
                 ENDIF
                 llContinue = .F.  && Set flag instead of RETURN
             ENDIF
@@ -283,7 +287,7 @@ FUNCTION RecordMatchesCriteria(lcActivoField, lcWebField)
                 
                 * Log para ver los valores actuales (primeros 5 registros)
                 IF RECNO() <= 5
-                    WriteLog("DEBUG RecordCriteria: Reg #" + TRANSFORM(RECNO()) + ": " + lcActivoField + "='" + lcActivoValue + "', " + lcWebField + "='" + lcWebValue + "'")
+                    WriteDebug("RecordCriteria: Reg #" + TRANSFORM(RECNO()) + ": " + lcActivoField + "='" + lcActivoValue + "', " + lcWebField + "='" + lcWebValue + "'")
                 ENDIF
                 
                 * Criterio original - solo aceptamos "S" como se ha verificado en el dataset
@@ -296,7 +300,7 @@ FUNCTION RecordMatchesCriteria(lcActivoField, lcWebField)
                 
                 * Log para ver cuáles registros pasan (primeros 5)
                 IF RECNO() <= 5
-                    WriteLog("DEBUG RecordCriteria: Reg #" + TRANSFORM(RECNO()) + " Match? " + IIF(llResult, "SI", "NO"))
+                    WriteDebug("RecordCriteria: Reg #" + TRANSFORM(RECNO()) + " Match? " + IIF(llResult, "SI", "NO"))
                 ENDIF
             ENDIF
         ENDIF
@@ -322,9 +326,9 @@ ENDFUNC
 FUNCTION PrepareProducts(lcArticuloPath)
     LOCAL lnCount, lnResult, lnIndex
     
-    WriteLog("PrepareProducts: ENTRADA - Verificando almacenamiento de productos")
-    WriteLog("PrepareProducts: gcProductList inicial: '" + LEFT(gcProductList, 50) + "'")
-    WriteLog("PrepareProducts: gnProductCount inicial: " + TRANSFORM(gnProductCount))
+    WriteDebug("PrepareProducts: ENTRADA - Verificando almacenamiento de productos")
+    WriteDebug("PrepareProducts: gcProductList inicial: '" + LEFT(gcProductList, 50) + "'")
+    WriteDebug("PrepareProducts: gnProductCount inicial: " + TRANSFORM(gnProductCount))
     
     lnCount = 0
     lnResult = 0
@@ -333,7 +337,7 @@ FUNCTION PrepareProducts(lcArticuloPath)
     gcProductList = ""
     gnProductCount = 0
     
-    WriteLog("PrepareProducts: Variables inicializadas")
+    WriteDebug("PrepareProducts: Variables inicializadas")
     
     TRY
         WriteLog("- Verificando archivo DBF: " + lcArticuloPath)
@@ -351,20 +355,20 @@ FUNCTION PrepareProducts(lcArticuloPath)
             SELECT Articulos
             
             * === DEBUG: Check field structure ===
-            WriteLog("DEBUG PrepareProducts: DBF tiene " + TRANSFORM(FCOUNT()) + " campos y " + TRANSFORM(RECCOUNT()) + " registros")
+            WriteDebug("PrepareProducts: DBF tiene " + TRANSFORM(FCOUNT()) + " campos y " + TRANSFORM(RECCOUNT()) + " registros")
             
             * Dynamically find field names that contain our patterns
             LOCAL lcActivoField, lcWebField
             lcActivoField = FindFieldByPattern("ACTIVO")
             lcWebField = FindFieldByPattern("WEB")
             
-            WriteLog("DEBUG PrepareProducts: Found field names:")
+            WriteDebug("PrepareProducts: Found field names:")
             WriteLog("  ACTIVO-like field: '" + lcActivoField + "'")
             WriteLog("  WEB-like field: '" + lcWebField + "'")
             
             IF EMPTY(lcActivoField) OR EMPTY(lcWebField)
-                WriteLog("DEBUG PrepareProducts: Missing critical fields!")
-                WriteLog("DEBUG PrepareProducts: Available fields (first 15):")
+                WriteDebug("PrepareProducts: Missing critical fields!")
+                WriteDebug("PrepareProducts: Available fields (first 15):")
                 LOCAL i
                 FOR i = 1 TO MIN(FCOUNT(), 15)
                     WriteLog("  " + TRANSFORM(i) + ". '" + FIELD(i) + "'")
@@ -380,13 +384,13 @@ FUNCTION PrepareProducts(lcArticuloPath)
             * Test sample values if fields found
             GO TOP
             IF !EOF()
-                WriteLog("DEBUG PrepareProducts: Sample values from first record:")
-                WriteLog("  " + lcActivoField + " = '" + TRANSFORM(EVALUATE(lcActivoField)) + "'")
-                WriteLog("  " + lcWebField + " = '" + TRANSFORM(EVALUATE(lcWebField)) + "'")
+                WriteDebug("PrepareProducts: Sample values from first record:")
+                WriteDebug("  " + lcActivoField + " = '" + TRANSFORM(EVALUATE(lcActivoField)) + "'")
+                WriteDebug("  " + lcWebField + " = '" + TRANSFORM(EVALUATE(lcWebField)) + "'")
             ENDIF
             
             * Count matching records using our helper function
-            WriteLog("DEBUG PrepareProducts: Counting matching records...")
+            WriteDebug("PrepareProducts: Counting matching records...")
             GO TOP
             lnCount = 0
             SCAN ALL
@@ -395,10 +399,10 @@ FUNCTION PrepareProducts(lcArticuloPath)
                 ENDIF
             ENDSCAN
             
-            WriteLog("DEBUG PrepareProducts: Found " + TRANSFORM(lnCount) + " matching records")
+            WriteDebug("PrepareProducts: Found " + TRANSFORM(lnCount) + " matching records")
             
             * Count and process matching records with SQL deduplication
-            WriteLog("DEBUG PrepareProducts: Using SQL GROUP BY for deduplication...")
+            WriteInfo("PrepareProducts: Using SQL GROUP BY for deduplication...")
             
             * Clean any existing cursors
             IF USED("UniqueProducts")
@@ -417,7 +421,7 @@ FUNCTION PrepareProducts(lcArticuloPath)
                 GROUP BY CODIGO ;
                 ORDER BY CODIGO ;
                 INTO CURSOR UniqueProducts
-            WriteLog("DEBUG PrepareProducts: Using FIRST occurrence strategy (MIN RECNO)")
+            WriteInfo("PrepareProducts: Using FIRST occurrence strategy (MIN RECNO)")
             
             * OPTION 2: Last occurrence (MAX RECNO) - COMMENTED OUT
             * SELECT CODIGO, MAX(RECNO()) as SelectedRecord ;
@@ -471,7 +475,7 @@ FUNCTION PrepareProducts(lcArticuloPath)
             * ========== END DEDUPLICATION STRATEGY OPTIONS ==========
             
             lnCount = _TALLY  && Number of unique products found
-            WriteLog("DEBUG PrepareProducts: SQL found " + TRANSFORM(lnCount) + " unique products")
+            WriteDebug("PrepareProducts: SQL found " + TRANSFORM(lnCount) + " unique products")
             
             IF lnCount > 0
                 WriteLog("- Encontrados " + TRANSFORM(lnCount) + " productos únicos activos para web")
@@ -494,7 +498,7 @@ FUNCTION PrepareProducts(lcArticuloPath)
                     
                     * Debug for first 5 unique products
                     IF gnProductCount <= 5
-                        WriteLog("DEBUG PrepareProducts: Producto único " + TRANSFORM(gnProductCount) + ": '" + lcProductCode + "'")
+                        WriteDebug("PrepareProducts: Producto único " + TRANSFORM(gnProductCount) + ": '" + lcProductCode + "'")
                     ENDIF
                 ENDSCAN
                 
@@ -507,23 +511,23 @@ FUNCTION PrepareProducts(lcArticuloPath)
                 
                 * Log results
                 IF lnResult > 0 AND !EMPTY(gcProductList)
-                    WriteLog("- Lista de productos preparada exitosamente con SQL deduplication")
-                    WriteLog("PrepareProducts: RESULTADOS - Productos únicos encontrados: " + TRANSFORM(lnCount))
-                    WriteLog("PrepareProducts: RESULTADOS - Productos excluidos: " + TRANSFORM(lnExcludedCount))
-                    WriteLog("PrepareProducts: RESULTADOS - Productos finales: " + TRANSFORM(gnProductCount))
-                    WriteLog("PrepareProducts: RESULTADOS - Duplicados eliminados por SQL: " + TRANSFORM(lnCount - gnProductCount + lnExcludedCount))
-                    WriteLog("PrepareProducts: SALIDA - Lista length: " + TRANSFORM(LEN(gcProductList)))
-                    WriteLog("PrepareProducts: SALIDA - Primer producto: '" + LEFT(gcProductList, AT(",", gcProductList + ",") - 1) + "'")
-                    WriteLog("PrepareProducts: SALIDA - Primeros 100 chars: '" + LEFT(gcProductList, 100) + "'")
+                    WriteInfo("- Lista de productos preparada exitosamente con SQL deduplication")
+                    WriteInfo("PrepareProducts: RESULTADOS - Productos únicos encontrados: " + TRANSFORM(lnCount))
+                    WriteInfo("PrepareProducts: RESULTADOS - Productos excluidos: " + TRANSFORM(lnExcludedCount))
+                    WriteInfo("PrepareProducts: RESULTADOS - Productos finales: " + TRANSFORM(gnProductCount))
+                    WriteDebug("PrepareProducts: RESULTADOS - Duplicados eliminados por SQL: " + TRANSFORM(lnCount - gnProductCount + lnExcludedCount))
+                    WriteDebug("PrepareProducts: SALIDA - Lista length: " + TRANSFORM(LEN(gcProductList)))
+                    WriteDebug("PrepareProducts: SALIDA - Primer producto: '" + LEFT(gcProductList, AT(",", gcProductList + ",") - 1) + "'")
+                    WriteDebug("PrepareProducts: SALIDA - Primeros 100 chars: '" + LEFT(gcProductList, 100) + "'")
                     
                     * Verificar estructura de la lista (contar comas)
                     LOCAL lnCommaCount
                     lnCommaCount = OCCURS(",", gcProductList)
-                    WriteLog("PrepareProducts: SALIDA - Comas encontradas: " + TRANSFORM(lnCommaCount) + " (esperadas: " + TRANSFORM(gnProductCount-1) + ")")
+                    WriteDebug("PrepareProducts: SALIDA - Comas encontradas: " + TRANSFORM(lnCommaCount) + " (esperadas: " + TRANSFORM(gnProductCount-1) + ")")
                 ELSE
-                    WriteLog("ERROR: No se pudieron cargar los productos")
-                    WriteLog("PrepareProducts: ERROR - lnResult: " + TRANSFORM(lnResult))
-                    WriteLog("PrepareProducts: ERROR - gcProductList empty: " + TRANSFORM(EMPTY(gcProductList)))
+                    WriteError("No se pudieron cargar los productos")
+                    WriteDebug("PrepareProducts: ERROR - lnResult: " + TRANSFORM(lnResult))
+                    WriteDebug("PrepareProducts: ERROR - gcProductList empty: " + TRANSFORM(EMPTY(gcProductList)))
                     lnResult = 0
                 ENDIF
             ELSE
@@ -551,7 +555,7 @@ FUNCTION PrepareProducts(lcArticuloPath)
         * === End enhanced error handling ===
     ENDTRY
     
-    WriteLog("PrepareProducts: FINAL - gnProductCount: " + TRANSFORM(gnProductCount) + ", Lista length: " + TRANSFORM(LEN(gcProductList)) + ", Retornando: " + TRANSFORM(lnResult))
+    WriteDebug("PrepareProducts: FINAL - gnProductCount: " + TRANSFORM(gnProductCount) + ", Lista length: " + TRANSFORM(LEN(gcProductList)) + ", Retornando: " + TRANSFORM(lnResult))
     
     RETURN lnResult
 ENDFUNC
@@ -572,11 +576,11 @@ PROCEDURE UploadProductBatches(lcApiBase, lcSyncId, lnBatchSize)
     WriteLog("OK: Verificación final pasada - procediendo con el envío")
     
     * Validación de las variables globales de productos
-    WriteLog("DEBUG UploadProductBatches: Verificación inicial")
-    WriteLog("DEBUG: gnProductCount = " + TRANSFORM(gnProductCount))
-    WriteLog("DEBUG: gcProductList length = " + TRANSFORM(LEN(gcProductList)))
-    WriteLog("DEBUG: gcProductList first 50 chars = '" + LEFT(gcProductList, 50) + "'")
-    WriteLog("DEBUG: Commas in gcProductList = " + TRANSFORM(OCCURS(",", gcProductList)))
+    WriteDebug("UploadProductBatches: Verificación inicial")
+    WriteDebug("DEBUG: gnProductCount = " + TRANSFORM(gnProductCount))
+    WriteDebug("DEBUG: gcProductList length = " + TRANSFORM(LEN(gcProductList)))
+    WriteDebug("DEBUG: gcProductList first 50 chars = '" + LEFT(gcProductList, 50) + "'")
+    WriteDebug("DEBUG: Commas in gcProductList = " + TRANSFORM(OCCURS(",", gcProductList)))
     
     * Verificar si tenemos productos para procesar
     IF gnProductCount <= 0 OR EMPTY(gcProductList)
@@ -608,9 +612,9 @@ PROCEDURE UploadProductBatches(lcApiBase, lcSyncId, lnBatchSize)
             lcBatchList = ExtractProductsFromRange(lnStart, lnEnd)
             
             * === DEBUG: Log batch summary ===
-            WriteLog("DEBUG: Lote " + TRANSFORM(i) + " - Rango: " + TRANSFORM(lnStart) + "-" + TRANSFORM(lnEnd))
-            WriteLog("DEBUG: Tamaño calculado del lote: " + TRANSFORM(lnActualBatchSize))
-            WriteLog("DEBUG: Número de productos extraídos: " + TRANSFORM(OCCURS(",", lcBatchList) + IIF(EMPTY(lcBatchList), 0, 1)))
+            WriteDebug("Lote " + TRANSFORM(i) + " - Rango: " + TRANSFORM(lnStart) + "-" + TRANSFORM(lnEnd))
+            WriteDebug("Tamaño calculado del lote: " + TRANSFORM(lnActualBatchSize))
+            WriteDebug("Número de productos extraídos: " + TRANSFORM(OCCURS(",", lcBatchList) + IIF(EMPTY(lcBatchList), 0, 1)))
             * === END DEBUG ===
             
             IF EMPTY(lcBatchList)
@@ -878,17 +882,55 @@ PROCEDURE InitLog
     STRTOFILE("=== Log de Sincronización iniciado: " + lcTimeStamp + " ====" + CHR(13) + CHR(10), gcLogFile)
 ENDPROC
 
-* Escribir en el log con timestamp
-PROCEDURE WriteLog(lcMessage)
-    LOCAL lcTimeStamp, lcLogLine
+* Escribir en el log con timestamp y nivel de logging
+* lnLevel: 0=ERROR, 1=INFO, 2=DEBUG
+PROCEDURE WriteLog(lcMessage, lnLevel)
+    LOCAL lcTimeStamp, lcLogLine, lcPrefix
     
-    * Mostrar en pantalla
-    ? lcMessage
+    * Default level is INFO if not specified
+    IF PARAMETERS() < 2
+        lnLevel = 1
+    ENDIF
     
-    * Guardar en archivo
+    * Only log if message level is within current log level
+    IF lnLevel > gnLogLevel
+        RETURN
+    ENDIF
+    
+    * Determine prefix based on level
+    DO CASE
+        CASE lnLevel = 0
+            lcPrefix = "ERROR: "
+        CASE lnLevel = 1
+            lcPrefix = ""
+        CASE lnLevel = 2
+            lcPrefix = "DEBUG: "
+        OTHERWISE
+            lcPrefix = ""
+    ENDCASE
+    
+    * Always show ERROR and INFO on screen, DEBUG only if level >= 2
+    IF lnLevel <= 1 OR gnLogLevel >= 2
+        ? lcPrefix + lcMessage
+    ENDIF
+    
+    * Always save to file regardless of level
     lcTimeStamp = TRANSFORM(DATETIME())
-    lcLogLine = "["+ lcTimeStamp + "] " + lcMessage + CHR(13) + CHR(10)
+    lcLogLine = "["+ lcTimeStamp + "] " + lcPrefix + lcMessage + CHR(13) + CHR(10)
     STRTOFILE(lcLogLine, gcLogFile, 1)  && Append mode
+ENDPROC
+
+* Convenience functions for different log levels
+PROCEDURE WriteError(lcMessage)
+    WriteLog(lcMessage, 0)
+ENDPROC
+
+PROCEDURE WriteInfo(lcMessage)
+    WriteLog(lcMessage, 1)
+ENDPROC
+
+PROCEDURE WriteDebug(lcMessage)
+    WriteLog(lcMessage, 2)
 ENDPROC
 
 * Mostrar mensaje de error
@@ -1022,7 +1064,7 @@ PROCEDURE ForceCloseAllDbfs()
     lnClosedAreas = 0
     
     TRY
-        WriteLog("DEBUG: Iniciando limpieza completa de bases de datos...")
+        WriteDebug("Iniciando limpieza completa de bases de datos...")
         
         * First pass: Close all work areas by number
         FOR i = 1 TO 255
@@ -1030,7 +1072,7 @@ PROCEDURE ForceCloseAllDbfs()
                 lnOpenAreas = lnOpenAreas + 1
                 TRY
                     lcAlias = ALIAS(i)
-                    WriteLog("DEBUG: Cerrando área " + TRANSFORM(i) + " (Alias: " + lcAlias + ")")
+                    WriteDebug("Cerrando área " + TRANSFORM(i) + " (Alias: " + lcAlias + ")")
                     USE IN (i)
                     lnClosedAreas = lnClosedAreas + 1
                 CATCH TO loCloseError
@@ -1046,7 +1088,7 @@ PROCEDURE ForceCloseAllDbfs()
         ENDFOR
         
         * Second pass: Close by known aliases (in case some remain)
-        LOCAL ARRAY laKnownAliases[9]
+        LOCAL ARRAY laKnownAliases[10]
         laKnownAliases[1] = "Articulos"
         laKnownAliases[2] = "ArtTemp"
         laKnownAliases[3] = "Tablas"
@@ -1056,11 +1098,12 @@ PROCEDURE ForceCloseAllDbfs()
         laKnownAliases[7] = "CombinaTemp"
         laKnownAliases[8] = "CombinaExclusions"
         laKnownAliases[9] = "UniqueProducts"
+        laKnownAliases[10] = "CombinaOptimized"
         
         FOR i = 1 TO ALEN(laKnownAliases)
             TRY
                 IF USED(laKnownAliases[i])
-                    WriteLog("DEBUG: Cerrando alias restante: " + laKnownAliases[i])
+                    WriteDebug("Cerrando alias restante: " + laKnownAliases[i])
                     USE IN (laKnownAliases[i])
                     lnClosedAreas = lnClosedAreas + 1
                 ENDIF
@@ -1072,7 +1115,7 @@ PROCEDURE ForceCloseAllDbfs()
         * Third pass: Nuclear option - CLOSE ALL
         TRY
             IF lnOpenAreas > lnClosedAreas
-                WriteLog("DEBUG: Ejecutando CLOSE ALL como medida de seguridad...")
+                WriteDebug("Ejecutando CLOSE ALL como medida de seguridad...")
                 CLOSE ALL
             ENDIF
         CATCH TO loCloseAllError
@@ -1088,7 +1131,7 @@ PROCEDURE ForceCloseAllDbfs()
             ENDIF
         ENDFOR
         
-        WriteLog("DEBUG: Limpieza completada - Áreas abiertas inicialmente: " + TRANSFORM(lnOpenAreas) + ;
+        WriteDebug("Limpieza completada - Áreas abiertas inicialmente: " + TRANSFORM(lnOpenAreas) + ;
                  ", Cerradas exitosamente: " + TRANSFORM(lnClosedAreas) + ;
                  ", Aún abiertas: " + TRANSFORM(lnStillOpen))
         
@@ -1112,7 +1155,7 @@ PROCEDURE ForceCloseAllDbfs()
         * Final emergency cleanup
         TRY
             CLOSE ALL
-            WriteLog("DEBUG: CLOSE ALL de emergencia ejecutado")
+            WriteDebug("CLOSE ALL de emergencia ejecutado")
         CATCH
             WriteLog("ERROR: Falló el CLOSE ALL de emergencia")
         ENDTRY
@@ -1179,24 +1222,24 @@ FUNCTION ExtractProductsFromRange(lnStart, lnEnd)
     lcResult = ""
     
     * More detailed log to diagnose product list state
-    WriteLog("DEBUG ExtractProductsFromRange: Estado inicial:")
-    WriteLog("  - gnProductCount: " + TRANSFORM(gnProductCount))
-    WriteLog("  - gcProductList empty?: " + TRANSFORM(EMPTY(gcProductList)))
-    WriteLog("  - gcProductList length: " + TRANSFORM(LEN(gcProductList)))
-    WriteLog("  - First 50 chars: '" + LEFT(gcProductList, 50) + "'")
-    WriteLog("  - Commas in list: " + TRANSFORM(OCCURS(",", gcProductList)))
+    WriteDebug("ExtractProductsFromRange: Estado inicial:")
+    WriteDebug("  - gnProductCount: " + TRANSFORM(gnProductCount))
+    WriteDebug("  - gcProductList empty?: " + TRANSFORM(EMPTY(gcProductList)))
+    WriteDebug("  - gcProductList length: " + TRANSFORM(LEN(gcProductList)))
+    WriteDebug("  - First 50 chars: '" + LEFT(gcProductList, 50) + "'")
+    WriteDebug("  - Commas in list: " + TRANSFORM(OCCURS(",", gcProductList)))
     
     IF EMPTY(gcProductList) OR gnProductCount <= 0
-        WriteLog("DEBUG ExtractProductsFromRange: Lista vacía o sin productos")
+        WriteDebug("ExtractProductsFromRange: Lista vacía o sin productos")
         RETURN lcResult
     ENDIF
     
     IF lnStart < 1 OR lnEnd < lnStart OR lnStart > gnProductCount
-        WriteLog("ERROR ExtractProductsFromRange: Rango inválido (" + TRANSFORM(lnStart) + "-" + TRANSFORM(lnEnd) + ") con total=" + TRANSFORM(gnProductCount))
+        WriteError("ExtractProductsFromRange: Rango inválido (" + TRANSFORM(lnStart) + "-" + TRANSFORM(lnEnd) + ") con total=" + TRANSFORM(gnProductCount))
         RETURN lcResult
     ENDIF
     
-    WriteLog("DEBUG ExtractProductsFromRange: Extrayendo rango " + TRANSFORM(lnStart) + "-" + TRANSFORM(lnEnd) + " de " + TRANSFORM(gnProductCount) + " productos")
+    WriteDebug("ExtractProductsFromRange: Extrayendo rango " + TRANSFORM(lnStart) + "-" + TRANSFORM(lnEnd) + " de " + TRANSFORM(gnProductCount) + " productos")
     
     TRY
         * Pure string manipulation - find products by position without creating arrays
@@ -1204,20 +1247,20 @@ FUNCTION ExtractProductsFromRange(lnStart, lnEnd)
         lnProductIndex = 0
         
         * Additional debug logging right before parsing
-        WriteLog("DEBUG: Empezando a procesar la cadena")
-        WriteLog("  - Current position: " + TRANSFORM(lnCurrentPos))
-        WriteLog("  - String length: " + TRANSFORM(LEN(gcProductList)))
+        WriteDebug("Empezando a procesar la cadena")
+        WriteDebug("  - Current position: " + TRANSFORM(lnCurrentPos))
+        WriteDebug("  - String length: " + TRANSFORM(LEN(gcProductList)))
         
         * Special case handling - check if there are no commas which means only one product
         IF OCCURS(",", gcProductList) = 0 AND !EMPTY(gcProductList)
-            WriteLog("DEBUG: Detectada lista con un solo producto (sin comas)")
+            WriteDebug("Detectada lista con un solo producto (sin comas)")
             lcProduct = ALLTRIM(gcProductList)
             lnProductIndex = 1
             
             * If this is the product we want (should be index 1), return it
             IF 1 >= lnStart AND 1 <= lnEnd AND !EMPTY(lcProduct)
                 lcResult = lcProduct
-                WriteLog("DEBUG: Retornando producto único: '" + lcProduct + "'")
+                WriteDebug("Retornando producto único: '" + lcProduct + "'")
             ENDIF
         ELSE
             * Normal case - multiple products with commas        * Walk through the comma-separated string
@@ -1238,8 +1281,8 @@ FUNCTION ExtractProductsFromRange(lnStart, lnEnd)
             
             * Debug for first 3 iterations
             IF lnProductIndex < 3
-                WriteLog("DEBUG Iterate: Index=" + TRANSFORM(lnProductIndex) + ", Pos=" + TRANSFORM(lnCurrentPos) + ", SubPos=" + TRANSFORM(lnSubCommaPos) + ", FullCommaPos=" + TRANSFORM(lnCommaPos))
-                WriteLog("  SubString: '" + LEFT(lcSubString, 20) + IIF(LEN(lcSubString) > 20, "...", "") + "'")
+                WriteDebug("Iterate: Index=" + TRANSFORM(lnProductIndex) + ", Pos=" + TRANSFORM(lnCurrentPos) + ", SubPos=" + TRANSFORM(lnSubCommaPos) + ", FullCommaPos=" + TRANSFORM(lnCommaPos))
+                WriteDebug("SubString: '" + LEFT(lcSubString, 20) + IIF(LEN(lcSubString) > 20, "...", "") + "'")
             ENDIF
             
             IF lnCommaPos = 0
@@ -1253,7 +1296,7 @@ FUNCTION ExtractProductsFromRange(lnStart, lnEnd)
                 
                 * Debug info for first few products
                 IF lnProductIndex <= 3 OR (lnProductIndex >= lnStart AND lnProductIndex <= lnStart + 2)
-                    WriteLog("DEBUG Product: Index=" + TRANSFORM(lnProductIndex) + ", Value='" + lcProduct + "'")
+                    WriteDebug("Product: Index=" + TRANSFORM(lnProductIndex) + ", Value='" + lcProduct + "'")
                 ENDIF
                 
                 * If this product is in our desired range, add it to result
@@ -1275,7 +1318,7 @@ FUNCTION ExtractProductsFromRange(lnStart, lnEnd)
         lcResult = ""
     ENDTRY
     
-    WriteLog("DEBUG ExtractProductsFromRange: Resultado final: '" + LEFT(lcResult, 100) + IIF(LEN(lcResult)>100, "...", "") + "' (" + TRANSFORM(OCCURS(",", lcResult) + IIF(EMPTY(lcResult), 0, 1)) + " productos)")
+    WriteDebug("ExtractProductsFromRange: Resultado final: '" + LEFT(lcResult, 100) + IIF(LEN(lcResult)>100, "...", "") + "' (" + TRANSFORM(OCCURS(",", lcResult) + IIF(EMPTY(lcResult), 0, 1)) + " productos)")
     
     RETURN lcResult
 ENDFUNC
@@ -1288,7 +1331,7 @@ FUNCTION ReportOpenDbfs()
     lcOpenFiles = ""
     
     TRY
-        WriteLog("DEBUG: Verificando archivos DBF abiertos...")
+        WriteDebug("Verificando archivos DBF abiertos...")
         
         * Check all possible work areas
         FOR i = 1 TO 255
@@ -1350,21 +1393,21 @@ FUNCTION BuildProductsJsonFromList(lcProductList)
     lcJson = "["
     
     TRY
-        WriteLog("   - Construyendo JSON para productos de la lista: " + LEFT(lcProductList, 50) + "...")
+        WriteInfo("   - Construyendo JSON para productos de la lista: " + LEFT(lcProductList, 50) + "...")
         
         lnCurrentPos = 1
         
         * Log total number of commas for verification
         LOCAL lnTotalCommas
         lnTotalCommas = OCCURS(",", lcProductList)
-        WriteLog("   - Número total de comas en la lista: " + TRANSFORM(lnTotalCommas) + " (esperados: " + TRANSFORM(lnTotalCommas + 1) + " productos)")
+        WriteDebug("   - Número total de comas en la lista: " + TRANSFORM(lnTotalCommas) + " (esperados: " + TRANSFORM(lnTotalCommas + 1) + " productos)")
         
         * Use array approach for safer processing
         LOCAL laProducts[1], lnProductCount
         lnProductCount = ALINES(laProducts, lcProductList, .T., ",")
         
         * Log how many products we parsed
-        WriteLog("   - Productos extraídos con ALINES: " + TRANSFORM(lnProductCount))
+        WriteDebug("   - Productos extraídos con ALINES: " + TRANSFORM(lnProductCount))
         
         * We no longer need lnCurrentPos - we're using array indices now
         * Remove all variables related to previous string parsing approach
@@ -1404,11 +1447,18 @@ FUNCTION BuildProductsJsonFromList(lcProductList)
                         * WriteLog("   - Producto encontrado en DBF: " + lcProduct)
                         * Build complete JSON with all fields
                         
-                        * Extract Variants from COMBINA.DBF (replaces old C1-C9, T1-T9 logic)
-                        lcVariants = ExtractVariantsFromCombina(lcProduct)
-                        
-                        * Extract Exclusions from COMBINA.DBF based on stock quantity
-                        lcExclusions = ExtractExclusionsFromCombina(lcProduct)
+                        * OPTIMIZED: Extract both Variants and Exclusions in single COMBINA.DBF scan
+                        LOCAL lcCombinedResult, lnPipePos
+                        lcCombinedResult = ExtractVariantsAndExclusionsFromCombina(lcProduct)
+                        lnPipePos = AT("|", lcCombinedResult)
+                        IF lnPipePos > 0
+                            lcVariants = LEFT(lcCombinedResult, lnPipePos - 1)
+                            lcExclusions = SUBSTR(lcCombinedResult, lnPipePos + 1)
+                        ELSE
+                            * Fallback if pipe separator not found
+                            lcVariants = '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]'
+                            lcExclusions = '[]'
+                        ENDIF
                         
                         * Get Brand from MARCA field (lookup in table 14)
                         lcBrand = "null"
@@ -1568,12 +1618,12 @@ ENDFUNC
 
 * ================================================================================
 * LookupTablas - Busca descripción en TABLAS.DBF por tabla y código
+* OPTIMIZED: Uses persistent connection to avoid repeated open/close operations
 * ================================================================================
 FUNCTION LookupTablas(lnTabla, lcCodigo)
     LOCAL lcResult, lcTablasPath, lcCodigoStr
     
     lcResult = ""
-    lcTablasPath = ADDBS(JUSTPATH(gcArticuloPath)) + "TABLAS.DBF"
     
     IF EMPTY(lcCodigo) OR EMPTY(lnTabla)
         RETURN lcResult
@@ -1583,33 +1633,33 @@ FUNCTION LookupTablas(lnTabla, lcCodigo)
     lcCodigoStr = ALLTRIM(TRANSFORM(lcCodigo))
     
     TRY
-        IF FILE(lcTablasPath)
-            * Ensure clean state
-            IF USED("TablasTemp")
-                USE IN TablasTemp
-            ENDIF
-            
-            USE (lcTablasPath) IN 0 SHARED ALIAS TablasTemp
-            SELECT TablasTemp
-            LOCATE FOR TablasTemp.TABLA = lnTabla AND ALLTRIM(TRANSFORM(TablasTemp.CODIGO)) = lcCodigoStr
-            
-            IF FOUND()
-                IF TYPE("TablasTemp.DESCRIP") != "U" AND !ISNULL(TablasTemp.DESCRIP)
-                    lcResult = ALLTRIM(TRANSFORM(TablasTemp.DESCRIP))
-                ENDIF
-            ENDIF
-            
-            * Cleanup
-            IF USED("TablasTemp")
-                USE IN TablasTemp
+        * OPTIMIZATION: Use persistent TABLAS connection if available
+        IF !USED("TablasLookup")
+            * Only open if not already open
+            lcTablasPath = gcTablasPath  && Use global path
+            IF FILE(lcTablasPath)
+                USE (lcTablasPath) IN 0 SHARED ALIAS TablasLookup
+            ELSE
+                RETURN lcResult
             ENDIF
         ENDIF
         
+        SELECT TablasLookup
+        LOCATE FOR TablasLookup.TABLA = lnTabla AND ALLTRIM(TRANSFORM(TablasLookup.CODIGO)) = lcCodigoStr
+        
+        IF FOUND()
+            IF TYPE("TablasLookup.DESCRIP") != "U" AND !ISNULL(TablasLookup.DESCRIP)
+                lcResult = ALLTRIM(TRANSFORM(TablasLookup.DESCRIP))
+            ENDIF
+        ENDIF
+        
+        * NOTE: We don't close TablasLookup here anymore - it stays open for reuse
+        
     CATCH TO loError
         WriteLog("   ERROR en LookupTablas(" + TRANSFORM(lnTabla) + ", " + lcCodigoStr + "): " + loError.Message)
-        * Ensure cleanup on error
-        IF USED("TablasTemp")
-            USE IN TablasTemp
+        * On error, try to close and reopen on next call
+        IF USED("TablasLookup")
+            USE IN TablasLookup
         ENDIF
     ENDTRY
     
@@ -2030,7 +2080,6 @@ FUNCTION ExtractExclusionsFromCombina(lcArticleCodigo)
                         TRY
                             lcColorDesc = LookupTablas(21, lcColorCode)  && Color table
                         CATCH TO loColorError
-                            WriteLog("   ADVERTENCIA ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Error lookup Color " + lcColorCode + " - " + loColorError.Message)
                             lcColorDesc = lcColorCode  && Fallback to code
                         ENDTRY
                     ENDIF
@@ -2039,7 +2088,6 @@ FUNCTION ExtractExclusionsFromCombina(lcArticleCodigo)
                         TRY
                             lcTalleDesc = LookupTablas(20, lcTalleCode)  && Talle table
                         CATCH TO loTalleError
-                            WriteLog("   ADVERTENCIA ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Error lookup Talle " + lcTalleCode + " - " + loTalleError.Message)
                             lcTalleDesc = lcTalleCode  && Fallback to code
                         ENDTRY
                     ENDIF
@@ -2071,11 +2119,6 @@ FUNCTION ExtractExclusionsFromCombina(lcArticleCodigo)
                         lcExclusions = lcExclusions + lcCurrentExclusion
                         
                         lnExclusionsFound = lnExclusionsFound + 1
-                        
-                        * * Debug log for first few exclusions
-                        * IF lnExclusionsFound <= 3
-                        *     WriteLog("   DEBUG ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: Exclusion " + TRANSFORM(lnExclusionsFound) + " - Color: '" + lcColorDesc + "', Talle: '" + lcTalleDesc + "', Cantidad: " + TRANSFORM(lnCantidad))
-                        * ENDIF
                     ENDIF
                 ENDIF
                 
@@ -2119,6 +2162,279 @@ FUNCTION ExtractExclusionsFromCombina(lcArticleCodigo)
     * ELSE
     *     WriteLog("   INFO ExtractExclusionsFromCombina[" + lcArticleCodigo + "]: " + TRANSFORM(lnExclusionsFound) + " variant combos sin stock encontrados")
     * ENDIF
+    
+    RETURN lcResult
+ENDFUNC
+
+* ================================================================================
+* ExtractVariantsAndExclusionsFromCombina - OPTIMIZED VERSION
+* Extract both variants and exclusions in a single COMBINA.DBF scan
+* Returns object with both Variants JSON and Exclusions JSON
+* FAULT-TOLERANT: Handles missing articles, corrupt data gracefully
+* ================================================================================
+FUNCTION ExtractVariantsAndExclusionsFromCombina(lcArticleCodigo)
+    LOCAL lcColors, lcTalles, lcExclusions, lcCombinaAlias
+    LOCAL lcColorCode, lcTalleCode, lcColorDesc, lcTalleDesc, lcValue
+    LOCAL lcColorList, lcTalleList  && String lists to track unique values
+    LOCAL lcVariants, lnCombinationsFound, lnExclusionsFound
+    LOCAL lnCantidad, lcCurrentExclusion
+    LOCAL lcResult  && Will contain pipe-separated result: variants|exclusions
+    
+    lcColors = ""
+    lcTalles = ""
+    lcExclusions = ""
+    lcColorList = ""  && Comma-separated list of unique color codes
+    lcTalleList = ""  && Comma-separated list of unique talle codes
+    lcCombinaAlias = "CombinaOptimized"
+    lnCombinationsFound = 0
+    lnExclusionsFound = 0
+    
+    IF EMPTY(lcArticleCodigo)
+        WriteLog("   ADVERTENCIA ExtractVariantsAndExclusionsFromCombina: Código de artículo vacío")
+        lcResult = '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]|[]'
+        RETURN lcResult
+    ENDIF
+    
+    TRY
+        * Check if COMBINA.DBF exists
+        IF !FILE(gcCombinaPath)
+            lcResult = '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]|[]'
+            RETURN lcResult
+        ENDIF
+        
+        * Open COMBINA.DBF with error handling
+        IF USED(lcCombinaAlias)
+            USE IN (lcCombinaAlias)
+        ENDIF
+        
+        TRY
+            USE (gcCombinaPath) IN 0 SHARED ALIAS (lcCombinaAlias)
+        CATCH TO loDbfError
+            lcResult = '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]|[]'
+            RETURN lcResult
+        ENDTRY
+        
+        SELECT (lcCombinaAlias)
+        
+        * Verify DBF structure has required fields
+        LOCAL llValidStructure
+        llValidStructure = .T.
+        IF TYPE("Articulo") = "U"
+            llValidStructure = .F.
+        ENDIF
+        
+        IF !llValidStructure
+            USE IN (lcCombinaAlias)
+            lcResult = '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]|[]'
+            RETURN lcResult
+        ENDIF
+        
+        * SINGLE SCAN: Process both variants and exclusions in one pass
+        SCAN FOR ALLTRIM(UPPER(Articulo)) = ALLTRIM(UPPER(lcArticleCodigo))
+            lnCombinationsFound = lnCombinationsFound + 1
+            
+            TRY
+                * Get stock quantity for exclusions processing
+                lnCantidad = 0
+                IF TYPE("Cantidad") = "N"
+                    lnCantidad = Cantidad
+                ELSE IF TYPE("Cantidad") != "U" AND !ISNULL(Cantidad)
+                    lnCantidad = VAL(TRANSFORM(Cantidad))
+                ENDIF
+                
+                * Process Color codes for variants
+                IF TYPE("Color") != "U" AND !ISNULL(Color) AND !EMPTY(Color)
+                    lcColorCode = ALLTRIM(TRANSFORM(Color))
+                    IF !EMPTY(lcColorCode) AND LEN(lcColorCode) <= 50
+                        * Add to unique color list (avoid duplicates)
+                        IF EMPTY(lcColorList) OR ("," + lcColorCode + ",") $ ("," + lcColorList + ",") = .F.
+                            IF !EMPTY(lcColorList)
+                                lcColorList = lcColorList + ","
+                            ENDIF
+                            lcColorList = lcColorList + lcColorCode
+                        ENDIF
+                    ENDIF
+                ENDIF
+                
+                * Process Talle codes for variants
+                IF TYPE("Talle") != "U" AND !ISNULL(Talle) AND !EMPTY(Talle)
+                    lcTalleCode = ALLTRIM(TRANSFORM(Talle))
+                    IF !EMPTY(lcTalleCode) AND LEN(lcTalleCode) <= 50
+                        * Add to unique talle list (avoid duplicates)
+                        IF EMPTY(lcTalleList) OR ("," + lcTalleCode + ",") $ ("," + lcTalleList + ",") = .F.
+                            IF !EMPTY(lcTalleList)
+                                lcTalleList = lcTalleList + ","
+                            ENDIF
+                            lcTalleList = lcTalleList + lcTalleCode
+                        ENDIF
+                    ENDIF
+                ENDIF
+                
+                * Process exclusions (out-of-stock combinations)
+                IF lnCantidad <= 0
+                    * Get color and talle for this specific combination
+                    lcColorCode = ""
+                    lcTalleCode = ""
+                    
+                    IF TYPE("Color") != "U" AND !ISNULL(Color) AND !EMPTY(Color)
+                        lcColorCode = ALLTRIM(TRANSFORM(Color))
+                    ENDIF
+                    
+                    IF TYPE("Talle") != "U" AND !ISNULL(Talle) AND !EMPTY(Talle)
+                        lcTalleCode = ALLTRIM(TRANSFORM(Talle))
+                    ENDIF
+                    
+                    * Get descriptions for exclusions
+                    lcColorDesc = ""
+                    lcTalleDesc = ""
+                    
+                    IF !EMPTY(lcColorCode)
+                        TRY
+                            lcColorDesc = LookupTablas(21, lcColorCode)
+                            IF EMPTY(lcColorDesc)
+                                lcColorDesc = lcColorCode  && Fallback to code
+                            ENDIF
+                        CATCH
+                            lcColorDesc = lcColorCode
+                        ENDTRY
+                    ENDIF
+                    
+                    IF !EMPTY(lcTalleCode)
+                        TRY
+                            lcTalleDesc = LookupTablas(20, lcTalleCode)
+                            IF EMPTY(lcTalleDesc)
+                                lcTalleDesc = lcTalleCode  && Fallback to code
+                            ENDIF
+                        CATCH
+                            lcTalleDesc = lcTalleCode
+                        ENDTRY
+                    ENDIF
+                    
+                    * Build exclusion entry if we have at least one variant
+                    IF !EMPTY(lcColorDesc) OR !EMPTY(lcTalleDesc)
+                        lcCurrentExclusion = "["
+                        
+                        IF !EMPTY(lcColorDesc)
+                            lcCurrentExclusion = lcCurrentExclusion + '{"Variant":"Color","Value":"' + STRTRAN(lcColorDesc, '"', '\"') + '"}'
+                            IF !EMPTY(lcTalleDesc)
+                                lcCurrentExclusion = lcCurrentExclusion + ","
+                            ENDIF
+                        ENDIF
+                        
+                        IF !EMPTY(lcTalleDesc)
+                            lcCurrentExclusion = lcCurrentExclusion + '{"Variant":"Talle","Value":"' + STRTRAN(lcTalleDesc, '"', '\"') + '"}'
+                        ENDIF
+                        
+                        lcCurrentExclusion = lcCurrentExclusion + "]"
+                        
+                        IF !EMPTY(lcExclusions)
+                            lcExclusions = lcExclusions + ","
+                        ENDIF
+                        lcExclusions = lcExclusions + lcCurrentExclusion
+                        
+                        lnExclusionsFound = lnExclusionsFound + 1
+                    ENDIF
+                ENDIF
+                
+            CATCH TO loCombinationError
+                WriteLog("   ADVERTENCIA ExtractVariantsAndExclusionsFromCombina[" + lcArticleCodigo + "]: Error en combinación - " + loCombinationError.Message)
+            ENDTRY
+        ENDSCAN
+        
+        * Build Colors JSON using TABLAS lookup (table 21)
+        IF !EMPTY(lcColorList)
+            TRY
+                LOCAL laColorCodes[1], lnColorItems, lnColorIdx
+                lnColorItems = ALINES(laColorCodes, STRTRAN(lcColorList, ",", CHR(13)))
+                
+                FOR lnColorIdx = 1 TO lnColorItems
+                    lcColorCode = ALLTRIM(laColorCodes[lnColorIdx])
+                    IF !EMPTY(lcColorCode)
+                        TRY
+                            lcColorDesc = LookupTablas(21, lcColorCode)
+                        CATCH
+                            lcColorDesc = ""
+                        ENDTRY
+                        
+                        lcValue = IIF(!EMPTY(lcColorDesc), lcColorDesc, lcColorCode)
+                        
+                        IF !EMPTY(lcValue) AND LEN(lcValue) <= 200
+                            IF !EMPTY(lcColors)
+                                lcColors = lcColors + ","
+                            ENDIF
+                            lcColors = lcColors + '"' + STRTRAN(lcValue, '"', '\"') + '"'
+                        ENDIF
+                    ENDIF
+                ENDFOR
+            CATCH TO loColorBuildError
+                lcColors = ""
+            ENDTRY
+        ENDIF
+        
+        * Build Talles JSON using TABLAS lookup (table 20) with fault tolerance  
+        IF !EMPTY(lcTalleList)
+            TRY
+                LOCAL laTalleCodes[1], lnTalleItems, lnTalleIdx
+                lnTalleItems = ALINES(laTalleCodes, STRTRAN(lcTalleList, ",", CHR(13)))
+                
+                FOR lnTalleIdx = 1 TO lnTalleItems
+                    lcTalleCode = ALLTRIM(laTalleCodes[lnTalleIdx])
+                    IF !EMPTY(lcTalleCode)
+                        TRY
+                            lcTalleDesc = LookupTablas(20, lcTalleCode)
+                        CATCH
+                            lcTalleDesc = ""
+                        ENDTRY
+                        
+                        lcValue = IIF(!EMPTY(lcTalleDesc), lcTalleDesc, lcTalleCode)
+                        
+                        IF !EMPTY(lcValue) AND LEN(lcValue) <= 200
+                            IF !EMPTY(lcTalles)
+                                lcTalles = lcTalles + ","
+                            ENDIF
+                            lcTalles = lcTalles + '"' + STRTRAN(lcValue, '"', '\"') + '"'
+                        ENDIF
+                    ENDIF
+                ENDFOR
+            CATCH TO loTalleBuildError
+                lcTalles = ""
+            ENDTRY
+        ENDIF
+        
+        * Close COMBINA.DBF
+        TRY
+            USE IN (lcCombinaAlias)
+        CATCH TO loCloseError
+            WriteLog("   ADVERTENCIA ExtractVariantsAndExclusionsFromCombina[" + lcArticleCodigo + "]: Error cerrando COMBINA.DBF - " + loCloseError.Message)
+        ENDTRY
+        
+    CATCH TO loError
+        WriteLog("   ERROR ExtractVariantsAndExclusionsFromCombina[" + lcArticleCodigo + "]: Error general - " + loError.Message)
+        
+        * Ensure cleanup on error
+        TRY
+            IF USED(lcCombinaAlias)
+                USE IN (lcCombinaAlias)
+            ENDIF
+        CATCH
+        ENDTRY
+        
+        lcColors = ""
+        lcTalles = ""
+        lcExclusions = ""
+    ENDTRY
+    
+    * Build final results
+    TRY
+        lcVariants = '['
+        lcVariants = lcVariants + '{"Variant":"Color","OrderedList":[' + lcColors + ']},'
+        lcVariants = lcVariants + '{"Variant":"Talle","OrderedList":[' + lcTalles + ']}'
+        lcVariants = lcVariants + ']'
+        
+        lcResult = lcVariants + "|[" + lcExclusions + "]"
+    CATCH TO loJsonError
+        lcResult = '[{"Variant":"Color","OrderedList":[]},{"Variant":"Talle","OrderedList":[]}]|[]'
+    ENDTRY
     
     RETURN lcResult
 ENDFUNC
