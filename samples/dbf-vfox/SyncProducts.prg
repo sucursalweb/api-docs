@@ -1490,16 +1490,16 @@ FUNCTION BuildProductsJsonFromList(lcProductList)
                                 lcTags = lcTags + '"' + STRTRAN(lcTagDesc, '"', '\"') + '"'
                             ENDIF
                         ENDIF
-                        IF TYPE("ArtTemp.VIRTUAL") != "U" AND !ISNULL(ArtTemp.VIRTUAL) AND !EMPTY(ArtTemp.VIRTUAL)
-                            lcVirtualValue = ALLTRIM(TRANSFORM(ArtTemp.VIRTUAL))
-                            lcTagDesc = LookupTablas(15, lcVirtualValue)
-                            IF !EMPTY(lcTagDesc)
-                                IF !EMPTY(lcTags)
-                                    lcTags = lcTags + ","
-                                ENDIF
-                                lcTags = lcTags + '"' + STRTRAN(lcTagDesc, '"', '\"') + '"'
-                            ENDIF
-                        ENDIF
+                        * IF TYPE("ArtTemp.VIRTUAL") != "U" AND !ISNULL(ArtTemp.VIRTUAL) AND !EMPTY(ArtTemp.VIRTUAL)
+                        *     lcVirtualValue = ALLTRIM(TRANSFORM(ArtTemp.VIRTUAL))
+                        *     lcTagDesc = LookupTablas(15, lcVirtualValue)
+                        *     IF !EMPTY(lcTagDesc)
+                        *         IF !EMPTY(lcTags)
+                        *             lcTags = lcTags + ","
+                        *         ENDIF
+                        *         lcTags = lcTags + '"' + STRTRAN(lcTagDesc, '"', '\"') + '"'
+                        *     ENDIF
+                        * ENDIF
                         
                         * Boolean flags - handle all data types safely
                         llIsNew = .F.
@@ -1531,7 +1531,7 @@ FUNCTION BuildProductsJsonFromList(lcProductList)
                         IF TYPE("ArtTemp.IMAGEN") != "U" AND !ISNULL(ArtTemp.IMAGEN) AND !EMPTY(ArtTemp.IMAGEN)
                             lcImagenValue = ALLTRIM(TRANSFORM(ArtTemp.IMAGEN))
                             IF !EMPTY(lcImagenValue) AND lcImagenValue != "0" AND lcImagenValue != ".F."
-                                lcPics = '"' + STRTRAN(lcImagenValue, '"', '\"') + '"'
+                                lcPics = '"' + STRTRAN(lcImagenValue + ".jpg", '"', '\"') + '"'
                             ENDIF
                         ENDIF
                         
