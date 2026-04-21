@@ -31,6 +31,12 @@
 PUBLIC gcProductList  && Will hold comma-separated list of products
 PUBLIC gnProductCount  && Count of products
 
+* Ensure exact string matching throughout so that shorter codes (e.g. "TA0411")
+* are never confused with longer codes that share the same prefix (e.g. "TA041124").
+* VFP defaults to SET EXACT OFF, where `"TA041124" = "TA0411"` evaluates TRUE,
+* which would cause LOCATE / SCAN FOR to match the wrong record.
+SET EXACT ON
+
 DO Main
 
 * Punto de entrada principal del programa
